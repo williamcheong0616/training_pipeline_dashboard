@@ -1,0 +1,62 @@
+# ── Environment & secrets ─────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.egg
+
+# ── Node / Next.js ────────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# ── ML artifacts (large binaries — never commit) ──────────────────────────────
+models/
+outputs/
+exports/
+checkpoints/
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.gguf
+*.ggml
+
+# ── Datasets ──────────────────────────────────────────────────────────────────
+datasets/
+data/
+*.jsonl
+*.parquet
+*.arrow
+
+# ── Database ──────────────────────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Logs & caches ─────────────────────────────────────────────────────────────
+logs/
+*.log
+.cache/
+runs/
+wandb/
+mlruns/
+tensorboard_logs/
+.ipynb_checkpoints/
+
+# ── OS / editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
