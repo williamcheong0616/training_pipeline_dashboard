@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "training-pipeline"
+version = "1.0.0"
+requires-python = ">=3.10"
+
+[project.scripts]
+llamapipeline = "backend.cli:app"
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["backend*"]
