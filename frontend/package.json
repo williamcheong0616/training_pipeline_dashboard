@@ -9,24 +9,28 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.40.0",
+    "axios": "^1.7.2",
+    "clsx": "^2.1.1",
+    "highlight.js": "^11.11.1",
     "next": "14.2.3",
     "react": "^18",
     "react-dom": "^18",
-    "@tanstack/react-query": "^5.40.0",
+    "react-markdown": "^10.1.0",
     "recharts": "^2.12.7",
-    "axios": "^1.7.2",
-    "clsx": "^2.1.1"
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
-    "typescript": "^5",
-    "tailwindcss": "^3.4.4",
-    "daisyui": "^4.12.10",
     "autoprefixer": "^10.4.19",
-    "postcss": "^8.4.38",
+    "daisyui": "^4.12.10",
     "eslint": "^8",
-    "eslint-config-next": "14.2.3"
+    "eslint-config-next": "14.2.3",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5"
   }
 }

@@ -2,6 +2,10 @@
 import { useRef, useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getModels, loadChatModel, getChatStatus, unloadChatModel } from "@/lib/api";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
+import "highlight.js/styles/github-dark.css";
 
 const QUANT_OPTIONS = ["none", "4bit", "8bit"] as const;
 
@@ -12,6 +16,78 @@ function Section({ title }: { title: string }) {
 }
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><label className="lf-label">{label}</label>{children}</div>;
+}
+
+function MarkdownMessage({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeHighlight]}
+      components={{
+        // Inline code
+        code({ className, children, ...props }) {
+          const isBlock = className?.includes("language-");
+          return isBlock ? (
+            <code className={className} {...props}>{children}</code>
+          ) : (
+            <code style={{
+              fontFamily: "var(--mono)", fontSize: 11,
+              background: "var(--bg-input)", border: "1px solid var(--border)",
+              borderRadius: 2, padding: "1px 5px", color: "var(--green)",
+            }} {...props}>{children}</code>
+          );
+        },
+        // Code block wrapper
+        pre({ children }) {
+          return (
+            <pre style={{
+              margin: "8px 0", borderRadius: 4, overflow: "auto",
+              border: "1px solid var(--border)", fontSize: 11,
+            }}>{children}</pre>
+          );
+        },
+        // Tables
+        table({ children }) {
+          return (
+            <div style={{ overflowX: "auto", margin: "8px 0" }}>
+              <table style={{ borderCollapse: "collapse", fontFamily: "var(--mono)", fontSize: 11, width: "100%" }}>{children}</table>
+            </div>
+          );
+        },
+        th({ children }) {
+          return <th style={{ padding: "4px 10px", borderBottom: "1px solid var(--border-hi)", color: "var(--text-dim)", textAlign: "left", fontWeight: 600 }}>{children}</th>;
+        },
+        td({ children }) {
+          return <td style={{ padding: "4px 10px", borderBottom: "1px solid var(--border)", color: "var(--text)" }}>{children}</td>;
+        },
+        // Headings
+        h1({ children }) { return <div style={{ fontFamily: "var(--mono)", fontSize: 15, fontWeight: 700, color: "var(--text-hi)", margin: "10px 0 4px" }}>{children}</div>; },
+        h2({ children }) { return <div style={{ fontFamily: "var(--mono)", fontSize: 13, fontWeight: 600, color: "var(--text-hi)", margin: "8px 0 4px" }}>{children}</div>; },
+        h3({ children }) { return <div style={{ fontFamily: "var(--mono)", fontSize: 12, fontWeight: 600, color: "var(--text)", margin: "6px 0 3px" }}>{children}</div>; },
+        // Lists
+        ul({ children }) { return <ul style={{ paddingLeft: 18, margin: "4px 0", fontSize: 12 }}>{children}</ul>; },
+        ol({ children }) { return <ol style={{ paddingLeft: 18, margin: "4px 0", fontSize: 12 }}>{children}</ol>; },
+        li({ children }) { return <li style={{ marginBottom: 2, color: "var(--text)" }}>{children}</li>; },
+        // Blockquote
+        blockquote({ children }) {
+          return <blockquote style={{ borderLeft: "3px solid var(--accent)", paddingLeft: 10, margin: "6px 0", color: "var(--text-dim)", fontStyle: "italic" }}>{children}</blockquote>;
+        },
+        // Paragraph
+        p({ children }) { return <p style={{ margin: "4px 0", lineHeight: 1.7 }}>{children}</p>; },
+        // Horizontal rule
+        hr() { return <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "8px 0" }} />; },
+        // Bold / italic
+        strong({ children }) { return <strong style={{ color: "var(--text-hi)", fontWeight: 600 }}>{children}</strong>; },
+        em({ children }) { return <em style={{ color: "var(--text-dim)" }}>{children}</em>; },
+        // Links
+        a({ href, children }) {
+          return <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", textDecoration: "underline" }}>{children}</a>;
+        },
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
 }
 
 function StatusDot({ status }: { status: string }) {
@@ -247,23 +323,34 @@ export default function ChatPage() {
           {messages.map((msg, i) => (
             <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
               <div style={{
-                maxWidth: "72%",
+                maxWidth: "80%",
                 padding: "8px 12px",
                 borderRadius: 4,
-                fontFamily: "var(--mono)",
                 fontSize: 12,
                 lineHeight: 1.7,
-                whiteSpace: "pre-wrap",
                 background: msg.role === "user" ? "var(--accent-dim)" : "var(--bg-panel)",
                 border: `1px solid ${msg.role === "user" ? "var(--accent)" : "var(--border)"}`,
                 color: msg.role === "user" ? "var(--accent)" : "var(--text)",
+                fontFamily: msg.role === "user" ? "var(--mono)" : "var(--sans)",
+                whiteSpace: msg.role === "user" ? "pre-wrap" : undefined,
               }}>
-                <div style={{ fontSize: 9, color: "var(--text-dim)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                <div style={{ fontSize: 9, color: "var(--text-dim)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: "var(--mono)" }}>
                   {msg.role}
                 </div>
-                {msg.content}
-                {msg.role === "assistant" && generating && i === messages.length - 1 && (
-                  <span className="lf-cursor" style={{ marginLeft: 2 }}>█</span>
+                {msg.role === "assistant" ? (
+                  <>
+                    <MarkdownMessage content={msg.content} />
+                    {generating && i === messages.length - 1 && (
+                      <span className="lf-cursor" style={{ marginLeft: 2 }}>█</span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {msg.content}
+                    {generating && i === messages.length - 1 && (
+                      <span className="lf-cursor" style={{ marginLeft: 2 }}>█</span>
+                    )}
+                  </>
                 )}
               </div>
             </div>
