@@ -34,6 +34,9 @@ checkpoints/
 
 # ── Datasets ──────────────────────────────────────────────────────────────────
 datasets/
+# Allow Next.js route folders named "datasets" inside the frontend
+!frontend/app/**/datasets/
+!frontend/app/**/datasets/**
 data/
 *.jsonl
 *.parquet
