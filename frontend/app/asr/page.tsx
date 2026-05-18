@@ -132,7 +132,7 @@ export default function ASRPage() {
 
   const { data: whisperModels = [] } = useQuery({ queryKey: ["asr-models"],  queryFn: getASRModels });
   const { data: datasets = [] }      = useQuery({ queryKey: ["asr-datasets"], queryFn: getASRDatasets });
-  const { data: sysStats }           = useQuery({ queryKey: ["system"],       queryFn: getSystemStats, refetchInterval: 5000 });
+  const { data: sysStats }           = useQuery({ queryKey: ["system"],       queryFn: getSystemStats, refetchInterval: 2000 });
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((p) => ({ ...p, [k]: v }));

@@ -103,7 +103,7 @@ function SystemMetrics({ stats }: { stats: SystemStats }) {
 export default function TopNav() {
   const path = usePathname();
   const { data: jobs = [] } = useQuery({ queryKey: ["jobs"], queryFn: getJobs, refetchInterval: 5000 });
-  const { data: stats }     = useQuery({ queryKey: ["system"], queryFn: getSystemStats, refetchInterval: 5000 });
+  const { data: stats }     = useQuery({ queryKey: ["system"], queryFn: getSystemStats, refetchInterval: 2000 });
 
   const running = jobs.filter((j) => j.status === "running").length;
 

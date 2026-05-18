@@ -96,7 +96,7 @@ export default function TrainPage() {
 
   const { data: models = [] }   = useQuery({ queryKey: ["models"],   queryFn: getModels });
   const { data: datasets = [] } = useQuery({ queryKey: ["datasets"], queryFn: getDatasets });
-  const { data: sysStats }      = useQuery({ queryKey: ["system"],   queryFn: getSystemStats, refetchInterval: 5000 });
+  const { data: sysStats }      = useQuery({ queryKey: ["system"],   queryFn: getSystemStats, refetchInterval: 2000 });
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
