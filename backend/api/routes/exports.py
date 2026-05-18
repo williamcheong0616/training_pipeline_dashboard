@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -40,11 +41,30 @@ def list_exports():
     return entries
 
 
+def _safe_output_name(raw: str, fallback: str) -> str:
+    name = re.sub(r'[/\\:*?"<>|]', '_', (raw or "").strip())[:128]
+    return name or fallback
+
+
+def _validated_save_path(name: str) -> str:
+    exports_real = os.path.realpath(EXPORTS_DIR)
+    candidate = os.path.realpath(os.path.join(EXPORTS_DIR, name))
+    if not candidate.startswith(exports_real + os.sep) and candidate != exports_real:
+        raise ValueError(f"Invalid output name — path escapes exports directory")
+    return candidate
+
+
 def _merge_adapter(adapter_path: str, save_path: str):
     import json
     from peft import PeftModel
 
-    cfg = json.loads(open(os.path.join(adapter_path, "adapter_config.json")).read())
+    cfg_path = os.path.join(adapter_path, "adapter_config.json")
+    try:
+        cfg = json.loads(open(cfg_path).read())
+    except FileNotFoundError:
+        raise RuntimeError("adapter_config.json not found — is this a valid adapter directory?")
+    except json.JSONDecodeError:
+        raise RuntimeError("adapter_config.json is malformed")
     base = cfg.get("base_model_name_or_path", "")
 
     if "whisper" in base.lower():
@@ -67,8 +87,11 @@ def _merge_adapter(adapter_path: str, save_path: str):
 def export_from_path(body: PathExportRequest, background_tasks: BackgroundTasks):
     if not os.path.isdir(body.adapter_path):
         raise HTTPException(status_code=400, detail="Adapter path does not exist")
-    name = body.output_name or f"merged_custom_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
-    save_path = os.path.join(EXPORTS_DIR, name)
+    name = _safe_output_name(body.output_name, f"merged_custom_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}")
+    try:
+        save_path = _validated_save_path(name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     background_tasks.add_task(_merge_adapter, body.adapter_path, save_path)
     return {"message": "Merge started", "save_path": save_path}
 
@@ -83,7 +106,10 @@ def export_job(job_id: int, body: ExportRequest, background_tasks: BackgroundTas
     if not job.output_dir or not os.path.isdir(job.output_dir):
         raise HTTPException(status_code=400, detail="Output directory not found")
 
-    name = body.output_name or f"merged_job_{job_id}"
-    save_path = os.path.join(EXPORTS_DIR, name)
+    name = _safe_output_name(body.output_name, f"merged_job_{job_id}")
+    try:
+        save_path = _validated_save_path(name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     background_tasks.add_task(_merge_adapter, job.output_dir, save_path)
     return {"message": "Merge started", "save_path": save_path}

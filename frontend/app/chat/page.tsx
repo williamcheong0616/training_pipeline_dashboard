@@ -43,6 +43,10 @@ export default function ChatPage() {
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
+
+  useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
   }, [messages]);
 
@@ -88,6 +92,8 @@ export default function ChatPage() {
     });
 
     if (!resp.ok || !resp.body) {
+      const errText = resp.ok ? "No response body" : (await resp.text().catch(() => `HTTP ${resp.status}`));
+      setMessages((p) => [...p, { role: "assistant", content: `[Error: ${errText}]` }]);
       setGenerating(false);
       abortRef.current = null;
       return;

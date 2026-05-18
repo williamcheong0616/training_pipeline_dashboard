@@ -11,6 +11,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from backend.api.deps import get_db
 from backend.db.models import Job, TrainingMetric
+from backend.db.session import SessionLocal
 from backend.workers.training_worker import run_training_job
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
@@ -101,42 +102,45 @@ def cancel_job(job_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{job_id}/metrics")
-async def stream_metrics(job_id: int, db: Session = Depends(get_db)):
-    job = db.get(Job, job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    last_id = 0
-
+async def stream_metrics(job_id: int):
     async def event_generator():
-        nonlocal last_id
-        while True:
-            rows = (
-                db.query(TrainingMetric)
-                .filter(TrainingMetric.job_id == job_id, TrainingMetric.id > last_id)
-                .order_by(TrainingMetric.id)
-                .all()
-            )
-            for row in rows:
-                last_id = row.id
-                yield {
-                    "data": json.dumps({
-                        "id": row.id,
-                        "step": row.step,
-                        "epoch": row.epoch,
-                        "loss": row.loss,
-                        "eval_loss": row.eval_loss,
-                        "learning_rate": row.learning_rate,
-                        "reward": row.reward,
-                        "grad_norm": row.grad_norm,
-                        "timestamp": row.timestamp.isoformat(),
-                    })
-                }
-            current_job = db.get(Job, job_id)
-            if current_job and current_job.status in ("completed", "failed", "cancelled"):
-                yield {"event": "done", "data": json.dumps({"status": current_job.status})}
-                break
-            await asyncio.sleep(2)
+        last_id = 0
+        db = SessionLocal()
+        try:
+            job = db.get(Job, job_id)
+            if not job:
+                yield {"event": "done", "data": json.dumps({"status": "not_found"})}
+                return
+            while True:
+                db.expire_all()
+                rows = (
+                    db.query(TrainingMetric)
+                    .filter(TrainingMetric.job_id == job_id, TrainingMetric.id > last_id)
+                    .order_by(TrainingMetric.id)
+                    .all()
+                )
+                for row in rows:
+                    last_id = row.id
+                    yield {
+                        "data": json.dumps({
+                            "id": row.id,
+                            "step": row.step,
+                            "epoch": row.epoch,
+                            "loss": row.loss,
+                            "eval_loss": row.eval_loss,
+                            "learning_rate": row.learning_rate,
+                            "reward": row.reward,
+                            "grad_norm": row.grad_norm,
+                            "timestamp": row.timestamp.isoformat(),
+                        })
+                    }
+                current_job = db.get(Job, job_id)
+                if current_job and current_job.status in ("completed", "failed", "cancelled"):
+                    yield {"event": "done", "data": json.dumps({"status": current_job.status})}
+                    break
+                await asyncio.sleep(2)
+        finally:
+            db.close()
 
     return EventSourceResponse(event_generator())
 

@@ -17,6 +17,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from backend.api.deps import get_db
 from backend.db.models import Job, Dataset, TrainingMetric
+from backend.db.session import SessionLocal
 from backend.workers.training_worker import run_training_job
 
 router = APIRouter(prefix="/api/asr", tags=["asr"])
@@ -131,7 +132,8 @@ async def upload_asr_zip(
 ):
     _MAX_ZIP_BYTES = 5 * 1024 * 1024 * 1024  # 5 GB
 
-    safe_name = name.strip().replace(" ", "_")
+    import re as _re
+    safe_name = _re.sub(r'[^\w\-]', '_', name.strip())[:100] or "dataset"
     extract_dir = os.path.join(AUDIO_DIR, safe_name)
 
     zip_bytes = await file.read()
@@ -140,6 +142,11 @@ async def upload_asr_zip(
 
     try:
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            # Zip-slip guard: reject any member that escapes the target directory
+            for member in zf.namelist():
+                member_path = os.path.realpath(os.path.join(extract_dir, member))
+                if not member_path.startswith(os.path.realpath(extract_dir) + os.sep):
+                    raise HTTPException(status_code=400, detail=f"Unsafe path in ZIP: {member}")
             # Validate CSV exists in the manifest BEFORE extracting anything
             csv_names = [
                 n for n in zf.namelist()
@@ -319,41 +326,44 @@ def cancel_asr_job(job_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/jobs/{job_id}/metrics")
-async def stream_asr_metrics(job_id: int, db: Session = Depends(get_db)):
-    job = db.get(Job, job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    last_id = 0
-
+async def stream_asr_metrics(job_id: int):
     async def event_generator():
-        nonlocal last_id
-        while True:
-            rows = (
-                db.query(TrainingMetric)
-                .filter(TrainingMetric.job_id == job_id, TrainingMetric.id > last_id)
-                .order_by(TrainingMetric.id)
-                .all()
-            )
-            for row in rows:
-                last_id = row.id
-                yield {
-                    "data": json.dumps({
-                        "id": row.id,
-                        "step": row.step,
-                        "epoch": row.epoch,
-                        "loss": row.loss,
-                        "eval_loss": row.eval_loss,
-                        "learning_rate": row.learning_rate,
-                        "reward": row.reward,
-                        "grad_norm": row.grad_norm,
-                        "timestamp": row.timestamp.isoformat(),
-                    })
-                }
-            current = db.get(Job, job_id)
-            if current and current.status in ("completed", "failed", "cancelled"):
-                yield {"event": "done", "data": json.dumps({"status": current.status})}
-                break
-            await asyncio.sleep(2)
+        last_id = 0
+        db = SessionLocal()
+        try:
+            job = db.get(Job, job_id)
+            if not job:
+                yield {"event": "done", "data": json.dumps({"status": "not_found"})}
+                return
+            while True:
+                db.expire_all()
+                rows = (
+                    db.query(TrainingMetric)
+                    .filter(TrainingMetric.job_id == job_id, TrainingMetric.id > last_id)
+                    .order_by(TrainingMetric.id)
+                    .all()
+                )
+                for row in rows:
+                    last_id = row.id
+                    yield {
+                        "data": json.dumps({
+                            "id": row.id,
+                            "step": row.step,
+                            "epoch": row.epoch,
+                            "loss": row.loss,
+                            "eval_loss": row.eval_loss,
+                            "learning_rate": row.learning_rate,
+                            "reward": row.reward,
+                            "grad_norm": row.grad_norm,
+                            "timestamp": row.timestamp.isoformat(),
+                        })
+                    }
+                current = db.get(Job, job_id)
+                if current and current.status in ("completed", "failed", "cancelled"):
+                    yield {"event": "done", "data": json.dumps({"status": current.status})}
+                    break
+                await asyncio.sleep(2)
+        finally:
+            db.close()
 
     return EventSourceResponse(event_generator())

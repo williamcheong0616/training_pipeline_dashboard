@@ -12,8 +12,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>("dark");
 
   useEffect(() => {
-    const stored = localStorage.getItem("forge-theme") as Theme | null;
-    const resolved = stored ?? "dark";
+    const stored = localStorage.getItem("forge-theme");
+    const resolved: Theme = stored === "light" || stored === "dark" ? stored : "dark";
     setTheme(resolved);
     document.documentElement.setAttribute("data-theme", resolved);
   }, []);
