@@ -25,6 +25,7 @@ class DatasetResponse(BaseModel):
     name: str
     path: str
     format: str
+    template: Optional[str]
     num_samples: Optional[int]
     description: Optional[str]
     created_at: datetime

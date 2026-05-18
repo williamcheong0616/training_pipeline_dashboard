@@ -52,6 +52,7 @@ export interface Dataset {
   name: string;
   path: string;
   format: string;
+  template: string | null;
   num_samples: number | null;
   description: string | null;
   created_at: string;

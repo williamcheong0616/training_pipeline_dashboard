@@ -41,7 +41,7 @@ const MOD_TIPS: Record<string, string> = {
   lm_head:   "Language model head — final linear layer mapping hidden states to vocabulary logits. LoRA here directly shapes output token distribution; rarely needed but useful for format or style tuning.",
 };
 
-function Field({ label, tooltip, children }: { label: string; tooltip?: string; children: React.ReactNode }) {
+function Field({ label, tooltip, children }: { label: React.ReactNode; tooltip?: string; children: React.ReactNode }) {
   return (
     <div>
       <label className="lf-label" style={{ display: "flex", alignItems: "center" }}>
@@ -130,6 +130,7 @@ export default function TrainPage() {
 
   const { data: models = [] }   = useQuery({ queryKey: ["models"],   queryFn: getModels });
   const { data: datasets = [] } = useQuery({ queryKey: ["datasets"], queryFn: getDatasets });
+  const selectedDataset = datasets.find((d) => d.id === Number(form.dataset_id)) ?? null;
   const { data: sysStats }      = useQuery({ queryKey: ["system"],   queryFn: getSystemStats, refetchInterval: 2000 });
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
@@ -250,7 +251,10 @@ export default function TrainPage() {
         </div>
 
         <div className="lf-row lf-row-3" style={{ marginBottom: 8 }}>
-          <Field label="template" tooltip="Chat prompt template that wraps instruction/response pairs before tokenization. Must match the model's original training format — a wrong template causes garbled outputs. E.g. llama3 for Meta-Llama-3, chatml for Qwen/Mistral.">
+          <Field
+            label={<>template{selectedDataset?.template && form.template === selectedDataset.template && <span style={{ marginLeft: 5, color: "var(--green)", fontSize: 10, fontFamily: "var(--mono)" }}>auto</span>}</>}
+            tooltip="Chat prompt template that wraps instruction/response pairs before tokenization. Must match the model's original training format — a wrong template causes garbled outputs. E.g. llama3 for Meta-Llama-3, chatml for Qwen/Mistral."
+          >
             <select className="lf-input lf-select" value={form.template} onChange={(e) => set("template", e.target.value)}>
               {["alpaca","chatml","llama3","mistral","qwen","phi3","gemma"].map((t) => <option key={t}>{t}</option>)}
             </select>
@@ -342,12 +346,23 @@ export default function TrainPage() {
 
         <div className="lf-row lf-row-2" style={{ marginBottom: 8 }}>
           <Field label="dataset" tooltip="The training dataset registered on the Datasets page. Upload JSON/JSONL files via Datasets ↗ before selecting here.">
-            <select className="lf-input lf-select" value={form.dataset_id} onChange={(e) => set("dataset_id", e.target.value)}>
+            <select className="lf-input lf-select" value={form.dataset_id} onChange={(e) => {
+              const id = e.target.value;
+              const d = datasets.find((x) => x.id === Number(id));
+              set("dataset_id", id);
+              if (d) {
+                set("dataset_format", d.format);
+                if (d.template) set("template", d.template);
+              }
+            }}>
               <option value="">— select —</option>
               {datasets.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.num_samples?.toLocaleString() ?? "?"})</option>)}
             </select>
           </Field>
-          <Field label="format" tooltip="Parsing format for the dataset. Must match how the data is structured. alpaca: {instruction, input, output}. sharegpt: {conversations: [{from, value}]}. plain_text: {text}. Wrong format causes training on malformed sequences.">
+          <Field
+            label={<>format{selectedDataset && form.dataset_format === selectedDataset.format && <span style={{ marginLeft: 5, color: "var(--green)", fontSize: 10, fontFamily: "var(--mono)" }}>auto</span>}</>}
+            tooltip="Parsing format for the dataset. Must match how the data is structured. alpaca: {instruction, input, output}. sharegpt: {conversations: [{from, value}]}. plain_text: {text}. Wrong format causes training on malformed sequences."
+          >
             <select className="lf-input lf-select" value={form.dataset_format} onChange={(e) => set("dataset_format", e.target.value)}>
               {["alpaca","sharegpt","plain_text"].map((f) => <option key={f}>{f}</option>)}
             </select>
