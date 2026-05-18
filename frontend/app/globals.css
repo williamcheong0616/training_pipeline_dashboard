@@ -1,3 +1,353 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --bg:        #0d0f14;
+  --bg-panel:  #13161e;
+  --bg-input:  #1a1d27;
+  --bg-hover:  #1f2333;
+  --border:    #252a3a;
+  --border-hi: #353c52;
+  --text:      #c8ccd8;
+  --text-dim:  #5e6478;
+  --text-hi:   #e8eaf0;
+  --accent:    #4a9eff;
+  --accent-dim:#1e3a5c;
+  --green:     #3dd68c;
+  --green-dim: #1a3d2e;
+  --red:       #f05050;
+  --red-dim:   #3d1a1a;
+  --amber:     #e8a820;
+  --amber-dim: #3d2e0a;
+  --mono:      'JetBrains Mono', monospace;
+  --sans:      'IBM Plex Sans', sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+/* ── Form controls ── */
+.lf-input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-hi);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 4px 8px;
+  height: 28px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.lf-input:focus { border-color: var(--accent); }
+.lf-input:hover:not(:focus) { border-color: var(--border-hi); }
+
+.lf-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%235e6478'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 24px;
+}
+
+.lf-textarea {
+  resize: vertical;
+  height: auto;
+  min-height: 60px;
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-hi);
+  padding: 6px 8px;
+  width: 100%;
+  outline: none;
+}
+.lf-textarea:focus { border-color: var(--accent); }
+
+.lf-label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 3px;
+  letter-spacing: 0.02em;
+}
+
+.lf-section {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 6px 0 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.lf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+.lf-btn-primary {
+  background: var(--accent);
+  color: #000;
+  border-color: var(--accent);
+}
+.lf-btn-primary:hover { filter: brightness(1.12); }
+.lf-btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.lf-btn-ghost {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border-hi);
+}
+.lf-btn-ghost:hover { background: var(--bg-hover); color: var(--text-hi); }
+
+.lf-btn-danger {
+  background: var(--red-dim);
+  color: var(--red);
+  border-color: var(--red-dim);
+}
+.lf-btn-danger:hover { background: var(--red); color: #fff; }
+
+.lf-btn-success {
+  background: var(--green-dim);
+  color: var(--green);
+  border-color: var(--green-dim);
+}
+.lf-btn-success:hover { background: var(--green); color: #000; }
+
+/* ── Toggle ── */
+.lf-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+}
+.lf-toggle input { display: none; }
+.lf-toggle-track {
+  width: 32px; height: 16px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition: all 0.15s;
+  position: relative;
+  flex-shrink: 0;
+}
+.lf-toggle-track::after {
+  content: '';
+  position: absolute;
+  left: 2px; top: 2px;
+  width: 10px; height: 10px;
+  background: var(--text-dim);
+  border-radius: 50%;
+  transition: all 0.15s;
+}
+.lf-toggle input:checked + .lf-toggle-track {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+.lf-toggle input:checked + .lf-toggle-track::after {
+  left: 18px;
+  background: var(--accent);
+}
+
+/* ── Badge ── */
+.lf-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.lf-badge-running  { background: var(--accent-dim); color: var(--accent); }
+.lf-badge-pending  { background: var(--amber-dim);  color: var(--amber); }
+.lf-badge-done     { background: var(--green-dim);  color: var(--green); }
+.lf-badge-failed   { background: var(--red-dim);    color: var(--red); }
+.lf-badge-cancelled{ background: #1a1d27;            color: var(--text-dim); }
+
+/* ── Log console ── */
+.lf-console {
+  background: #090b10;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  padding: 8px 10px;
+  overflow-y: auto;
+  color: #7ec8a4;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── Panel ── */
+.lf-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+/* ── Top nav tabs ── */
+.lf-tab {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 16px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.12s;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.lf-tab:hover { color: var(--text-hi); }
+.lf-tab-active {
+  color: var(--accent) !important;
+  border-bottom-color: var(--accent);
+}
+
+/* ── Range input ── */
+input[type=range] {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--bg-input);
+  border-radius: 2px;
+  outline: none;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+/* ── Progress bar ── */
+.lf-progress-track {
+  background: var(--bg-input);
+  border-radius: 2px;
+  height: 6px;
+  overflow: hidden;
+}
+.lf-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* ── Table ── */
+.lf-table { width: 100%; border-collapse: collapse; }
+.lf-table th {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  padding: 6px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.lf-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text);
+}
+.lf-table tr:last-child td { border-bottom: none; }
+.lf-table tr:hover td { background: var(--bg-hover); }
+
+/* ── Grid form row ── */
+.lf-row { display: grid; gap: 8px; }
+.lf-row-2 { grid-template-columns: 1fr 1fr; }
+.lf-row-3 { grid-template-columns: 1fr 1fr 1fr; }
+.lf-row-4 { grid-template-columns: repeat(4, 1fr); }
+
+/* ── Checkbox group ── */
+.lf-checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.lf-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.lf-chip:hover { border-color: var(--border-hi); color: var(--text); }
+.lf-chip-active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Spinner ── */
+@keyframes spin { to { transform: rotate(360deg); } }
+.lf-spin {
+  display: inline-block;
+  width: 12px; height: 12px;
+  border: 2px solid var(--border-hi);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+/* ── Blink cursor for log ── */
+@keyframes blink { 50% { opacity: 0; } }
+.lf-cursor { animation: blink 1s step-end infinite; }

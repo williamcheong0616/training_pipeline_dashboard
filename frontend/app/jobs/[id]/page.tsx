@@ -1,20 +1,31 @@
 "use client";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getJob, cancelJob, exportJob } from "@/lib/api";
 import { useMetricsStream } from "@/lib/sse";
-import MetricsChart from "@/components/MetricsChart";
-import JobStatusBadge from "@/components/JobStatusBadge";
+import MetricsPanel from "@/components/MetricsPanel";
+import type { JobStatus } from "@/types";
+
+function badge(status: JobStatus) {
+  const map: Record<JobStatus, string> = {
+    pending: "lf-badge-pending", running: "lf-badge-running",
+    completed: "lf-badge-done", failed: "lf-badge-failed", cancelled: "lf-badge-cancelled",
+  };
+  return <span className={`lf-badge ${map[status]}`}>{status}</span>;
+}
 
 export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>();
   const jobId = Number(id);
   const qc = useQueryClient();
+  const logRef = useRef<HTMLDivElement>(null);
+  const [logs, setLogs] = useState<string[]>([]);
 
-  const { data: job, isLoading } = useQuery({
+  const { data: job } = useQuery({
     queryKey: ["job", jobId],
     queryFn: () => getJob(jobId),
-    refetchInterval: (q) => (q.state.data?.status === "running" ? 5000 : false),
+    refetchInterval: (q) => (q.state.data?.status === "running" ? 3000 : false),
   });
 
   const metrics = useMetricsStream(job?.status === "running" ? jobId : null);
@@ -28,82 +39,122 @@ export default function JobDetailPage() {
     mutationFn: () => exportJob(jobId),
   });
 
-  if (isLoading) return <div className="skeleton h-64 w-full rounded-box" />;
-  if (!job) return <div className="alert alert-error">Job not found</div>;
+  useEffect(() => {
+    if (!job) return;
+    const lines = [
+      `[system] Job #${job.id}: ${job.name}`,
+      `[system] Method=${job.training_method.toUpperCase()}  PEFT=${job.peft_method}  Status=${job.status}`,
+    ];
+    if (job.started_at) lines.push(`[system] Started: ${new Date(job.started_at).toLocaleString()}`);
+    if (job.error_msg) lines.push(`[error] ${job.error_msg}`);
+    setLogs(lines);
+  }, [job?.id]);
 
-  const config = job as unknown as { config_json?: Record<string, unknown> };
+  useEffect(() => {
+    if (metrics.length === 0) return;
+    const last = metrics[metrics.length - 1];
+    const parts = [`[step ${last.step}]`];
+    if (last.loss != null) parts.push(`loss=${last.loss.toFixed(4)}`);
+    if (last.eval_loss != null) parts.push(`eval_loss=${last.eval_loss.toFixed(4)}`);
+    if (last.learning_rate != null) parts.push(`lr=${last.learning_rate.toExponential(2)}`);
+    if (last.epoch != null) parts.push(`epoch=${last.epoch.toFixed(2)}`);
+    if (last.grad_norm != null) parts.push(`grad_norm=${last.grad_norm.toFixed(3)}`);
+    if (last.reward != null) parts.push(`reward=${last.reward.toFixed(4)}`);
+    setLogs((p) => [...p, parts.join("  ")]);
+  }, [metrics.length]);
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [logs]);
+
+  if (!job) return (
+    <div style={{ padding: 24, fontFamily: "var(--mono)", fontSize: 12, color: "var(--text-dim)" }}>loading…</div>
+  );
+
+  const cfg = (job as unknown as { config_json?: Record<string, unknown> }).config_json ?? {};
 
   return (
-    <div className="space-y-6 max-w-4xl">
-      <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">{job.name}</h2>
-          <p className="text-sm text-base-content/50 mt-1">Job #{job.id}</p>
+    <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", height: "calc(100vh - 40px)", overflow: "hidden" }}>
+      {/* ── LEFT: Config details ── */}
+      <div style={{ borderRight: "1px solid var(--border)", overflowY: "auto", padding: "10px 12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          {badge(job.status)}
+          <span style={{ fontFamily: "var(--mono)", fontSize: 12, fontWeight: 600, color: "var(--text-hi)" }}>#{job.id} {job.name}</span>
         </div>
-        <div className="flex gap-2">
+
+        {job.error_msg && (
+          <div style={{ background: "var(--red-dim)", border: "1px solid var(--red)", borderRadius: 3, padding: "8px 10px", marginBottom: 10, fontFamily: "var(--mono)", fontSize: 11, color: "var(--red)" }}>
+            {job.error_msg}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
           {(job.status === "running" || job.status === "pending") && (
-            <button className="btn btn-error btn-sm btn-outline" onClick={() => cancel()}>Stop</button>
+            <button className="lf-btn lf-btn-danger" style={{ flex: 1 }} onClick={() => cancel()}>■ Abort</button>
           )}
           {job.status === "completed" && (
-            <button className="btn btn-success btn-sm" disabled={exporting} onClick={() => doExport()}>
-              {exporting ? <span className="loading loading-spinner" /> : "Export / Merge"}
+            <button className="lf-btn lf-btn-success" style={{ flex: 1 }} disabled={exporting} onClick={() => doExport()}>
+              {exporting ? <><span className="lf-spin" /> Merging…</> : "⇓ Export & Merge"}
             </button>
           )}
         </div>
-      </div>
 
-      {/* Status strip */}
-      <div className="flex flex-wrap gap-4 text-sm">
-        <div className="flex items-center gap-2">
-          <span className="text-base-content/50">Status</span>
-          <JobStatusBadge status={job.status} />
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-base-content/50">Method</span>
-          <span className="badge badge-ghost badge-sm uppercase font-mono">{job.training_method}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-base-content/50">PEFT</span>
-          <span className="font-mono text-xs">{job.peft_method}</span>
-        </div>
-        {job.started_at && (
-          <div className="flex items-center gap-2">
-            <span className="text-base-content/50">Started</span>
-            <span className="text-xs">{new Date(job.started_at).toLocaleString()}</span>
+        <div className="lf-section">Job Info</div>
+        <ConfigTable rows={[
+          ["method",    job.training_method.toUpperCase()],
+          ["peft",      job.peft_method],
+          ["created",   new Date(job.created_at).toLocaleString()],
+          ["started",   job.started_at ? new Date(job.started_at).toLocaleString() : "—"],
+          ["finished",  job.finished_at ? new Date(job.finished_at).toLocaleString() : "—"],
+          ["output",    job.output_dir ?? "—"],
+        ]} />
+
+        <div className="lf-section" style={{ marginTop: 12 }}>Config</div>
+        {Object.entries(cfg).map(([k, v]) => (
+          <div key={k} style={{ display: "flex", gap: 8, padding: "3px 0", borderBottom: "1px solid var(--border)" }}>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", minWidth: 120, flexShrink: 0 }}>{k}</span>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-hi)", wordBreak: "break-all" }}>
+              {Array.isArray(v) ? v.join(", ") : v == null ? "null" : String(v)}
+            </span>
           </div>
-        )}
+        ))}
       </div>
 
-      {job.error_msg && (
-        <div className="alert alert-error text-sm">
-          <span className="font-semibold">Error:</span> {job.error_msg}
+      {/* ── RIGHT: Metrics + Log ── */}
+      <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {/* Charts */}
+        <div style={{ flex: "0 0 auto", padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+          <MetricsPanel metrics={metrics} />
         </div>
-      )}
 
-      {/* Metrics */}
-      <div className="card bg-base-200 border border-base-300">
-        <div className="card-body p-4">
-          <h3 className="card-title text-sm mb-2">Training Metrics</h3>
-          <MetricsChart metrics={metrics} />
+        {/* Log console */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", padding: "10px 14px" }}>
+          <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+            Output Log
+          </div>
+          <div ref={logRef} className="lf-console" style={{ flex: 1 }}>
+            {logs.map((line, i) => (
+              <div key={i} style={{ color: line.startsWith("[error]") ? "var(--red)" : line.startsWith("[system]") ? "var(--text-dim)" : "var(--green)" }}>
+                {line}
+              </div>
+            ))}
+            {job.status === "running" && <span className="lf-cursor">█</span>}
+          </div>
         </div>
       </div>
+    </div>
+  );
+}
 
-      {/* Config */}
-      <div className="collapse collapse-arrow bg-base-200 border border-base-300">
-        <input type="checkbox" />
-        <div className="collapse-title font-medium text-sm">Training Config</div>
-        <div className="collapse-content">
-          <pre className="text-xs overflow-auto bg-base-300 rounded p-3 max-h-64">
-            {JSON.stringify(config.config_json ?? {}, null, 2)}
-          </pre>
+function ConfigTable({ rows }: { rows: [string, string][] }) {
+  return (
+    <div>
+      {rows.map(([k, v]) => (
+        <div key={k} style={{ display: "flex", gap: 8, padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", minWidth: 80, flexShrink: 0 }}>{k}</span>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-hi)", wordBreak: "break-all" }}>{v}</span>
         </div>
-      </div>
-
-      {job.output_dir && (
-        <div className="text-xs text-base-content/40">
-          Output: <span className="font-mono">{job.output_dir}</span>
-        </div>
-      )}
+      ))}
     </div>
   );
 }

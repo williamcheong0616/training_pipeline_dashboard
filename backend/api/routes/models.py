@@ -96,7 +96,7 @@ def download_model(model_id: int, background_tasks: BackgroundTasks, db: Session
 def search_hub(q: str, limit: int = 10) -> List[HFSearchResult]:
     from huggingface_hub import HfApi
     api = HfApi()
-    results = api.list_models(search=q, limit=limit, sort="downloads", direction=-1)
+    results = api.list_models(search=q, limit=limit, sort="downloads")
     return [
         HFSearchResult(
             model_id=m.id,

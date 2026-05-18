@@ -6,12 +6,6 @@ const config: Config = {
     "./components/**/*.{ts,tsx}",
   ],
   theme: { extend: {} },
-  plugins: [require("daisyui")],
-  daisyui: {
-    themes: ["night", "light"],
-    darkTheme: "night",
-    base: true,
-    styled: true,
-  },
+  plugins: [],
 };
 export default config;

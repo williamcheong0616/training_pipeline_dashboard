@@ -1,22 +1,20 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import Sidebar from "@/components/Sidebar";
+import TopNav from "@/components/TopNav";
 import Providers from "@/components/Providers";
 
 export const metadata: Metadata = {
-  title: "Training Pipeline",
-  description: "LLM fine-tuning dashboard",
+  title: "Forge — LLM Fine-Tuning",
+  description: "LLM Fine-Tuning Platform",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" data-theme="night">
-      <body className="min-h-screen bg-base-100 text-base-content">
+    <html lang="en">
+      <body style={{ margin: 0, padding: 0, display: "flex", flexDirection: "column", minHeight: "100vh" }}>
         <Providers>
-          <div className="flex min-h-screen">
-            <Sidebar />
-            <main className="flex-1 p-6 overflow-auto">{children}</main>
-          </div>
+          <TopNav />
+          <main style={{ flex: 1, overflow: "hidden" }}>{children}</main>
         </Providers>
       </body>
     </html>

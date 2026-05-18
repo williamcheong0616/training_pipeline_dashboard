@@ -8,7 +8,7 @@ version = "1.0.0"
 requires-python = ">=3.10"
 
 [project.scripts]
-llamapipeline = "backend.cli:app"
+forge = "backend.cli:app"
 
 [tool.setuptools.packages.find]
 where = [".."]
