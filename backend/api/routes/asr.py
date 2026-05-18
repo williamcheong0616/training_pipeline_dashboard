@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
@@ -295,11 +295,17 @@ def create_asr_job(body: ASRJobCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/jobs", response_model=List[JobResponse])
-def list_asr_jobs(db: Session = Depends(get_db)):
+def list_asr_jobs(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, le=200),
+    db: Session = Depends(get_db),
+):
     return (
         db.query(Job)
         .filter(Job.training_method == "asr_whisper")
         .order_by(Job.created_at.desc())
+        .offset(skip)
+        .limit(limit)
         .all()
     )
 
@@ -358,7 +364,7 @@ async def stream_asr_metrics(job_id: int):
                             "timestamp": row.timestamp.isoformat(),
                         })
                     }
-                current = db.get(Job, job_id)
+                current = db.query(Job).filter(Job.id == job_id).first()
                 if current and current.status in ("completed", "failed", "cancelled"):
                     yield {"event": "done", "data": json.dumps({"status": current.status})}
                     break

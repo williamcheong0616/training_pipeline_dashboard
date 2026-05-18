@@ -35,7 +35,7 @@ class TrainingMetric(Base):
     __tablename__ = "training_metrics"
 
     id = Column(Integer, primary_key=True, index=True)
-    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False, index=True)
     step = Column(Integer, nullable=False)
     epoch = Column(Float, nullable=True)
     loss = Column(Float, nullable=True)

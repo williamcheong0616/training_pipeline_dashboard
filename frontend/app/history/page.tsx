@@ -171,6 +171,7 @@ function RemarksEditor({ job }: { job: Job }) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { setText(job.remarks ?? ""); setSaved(true); }, [job.id, job.remarks]);
+  useEffect(() => { return () => { if (timerRef.current) clearTimeout(timerRef.current); }; }, []);
 
   const { mutate: save } = useMutation({
     mutationFn: (r: string) => updateJobRemarks(job.id, r),
@@ -283,8 +284,8 @@ type FilterType   = "all" | "llm" | "asr";
 
 export default function HistoryPage() {
   const qc = useQueryClient();
-  const { data: llmJobs = [] } = useQuery({ queryKey: ["jobs"],     queryFn: getJobs,    refetchInterval: 8000 });
-  const { data: asrJobs = [] } = useQuery({ queryKey: ["asr-jobs"], queryFn: getASRJobs, refetchInterval: 8000 });
+  const { data: llmJobs = [] } = useQuery({ queryKey: ["jobs"],     queryFn: getJobs,    refetchInterval: 8000, staleTime: 6000 });
+  const { data: asrJobs = [] } = useQuery({ queryKey: ["asr-jobs"], queryFn: getASRJobs, refetchInterval: 8000, staleTime: 6000 });
 
   const { mutate: doDelete } = useMutation({
     mutationFn: purgeJob,

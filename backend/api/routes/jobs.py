@@ -62,9 +62,12 @@ def create_job(body: JobCreate, db: Session = Depends(get_db)):
         output_dir=body.config.get("output_dir"),
     )
     db.add(job)
-    db.commit()
-    db.refresh(job)
-    task = run_training_job.delay(job.id)
+    db.flush()  # get ID without committing so we can roll back if Celery fails
+    try:
+        task = run_training_job.delay(job.id)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail=f"Task queue unavailable: {exc}")
     job.celery_task_id = task.id
     db.commit()
     db.refresh(job)
@@ -112,7 +115,6 @@ async def stream_metrics(job_id: int):
                 yield {"event": "done", "data": json.dumps({"status": "not_found"})}
                 return
             while True:
-                db.expire_all()
                 rows = (
                     db.query(TrainingMetric)
                     .filter(TrainingMetric.job_id == job_id, TrainingMetric.id > last_id)
@@ -134,7 +136,8 @@ async def stream_metrics(job_id: int):
                             "timestamp": row.timestamp.isoformat(),
                         })
                     }
-                current_job = db.get(Job, job_id)
+                # Use query() not get() to bypass identity map and get fresh status
+                current_job = db.query(Job).filter(Job.id == job_id).first()
                 if current_job and current_job.status in ("completed", "failed", "cancelled"):
                     yield {"event": "done", "data": json.dumps({"status": current_job.status})}
                     break
@@ -179,5 +182,7 @@ def purge_job(job_id: int, db: Session = Depends(get_db)):
     job = db.get(Job, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    if job.status not in ("completed", "failed", "cancelled"):
+        raise HTTPException(status_code=409, detail="Only terminal jobs (completed/failed/cancelled) can be purged")
     db.delete(job)
     db.commit()

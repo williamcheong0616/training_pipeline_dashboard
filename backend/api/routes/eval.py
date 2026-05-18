@@ -18,6 +18,8 @@ from backend.db.models import Dataset
 
 router = APIRouter(prefix="/api/eval", tags=["eval"])
 
+_OUTPUTS_DIR = os.getenv("OUTPUTS_DIR", "./outputs")
+
 # In-memory run store: run_id → { status, logs, result, started_at }
 _runs: dict[str, dict] = {}
 
@@ -108,7 +110,7 @@ def _run_eval(run_id: str, req: EvalRequest, csv_path: Optional[str]):
 
         else:
             # Predict mode
-            out_path = req.predict_output or f"./outputs/predict_{run_id[:8]}.jsonl"
+            out_path = req.predict_output or os.path.join(_OUTPUTS_DIR, f"predict_{run_id[:8]}.jsonl")
             os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
             _push(run_id, f"[predict] Output → {out_path}")
 
@@ -211,7 +213,7 @@ def _run_asr_eval(run_id: str, req: EvalRequest, csv_path: Optional[str]):
             _runs[run_id]["result"] = {"wer": round(wer, 4), "n_samples": len(preds)}
 
         else:
-            out_path = req.predict_output or f"./outputs/asr_predict_{run_id[:8]}.jsonl"
+            out_path = req.predict_output or os.path.join(_OUTPUTS_DIR, f"asr_predict_{run_id[:8]}.jsonl")
             os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
             _push(run_id, f"[predict] Output → {out_path}")
             with open(out_path, "w", encoding="utf-8") as fout:

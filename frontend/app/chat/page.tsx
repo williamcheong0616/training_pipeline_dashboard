@@ -178,7 +178,12 @@ export default function ChatPage() {
             onClick={() => doLoad()}>
             {chatStatus?.status === "loading" ? <><span className="lf-spin" /> Loading…</> : "Load Model"}
           </button>
-          <button className="lf-btn lf-btn-danger" disabled={!isReady} onClick={() => doUnload()} style={{ padding: "0 12px" }}>
+          <button className="lf-btn lf-btn-danger" disabled={!isReady} style={{ padding: "0 12px" }}
+            onClick={() => {
+              if (window.confirm("Unload the model? This clears GPU memory — you will need to reload to chat again.")) {
+                doUnload();
+              }
+            }}>
             Unload
           </button>
         </div>

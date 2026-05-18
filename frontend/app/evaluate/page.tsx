@@ -89,6 +89,11 @@ export default function EvaluatePage() {
   const [result,  setResult]  = useState<Record<string, unknown> | null>(null);
   const [status,  setStatus]  = useState("idle");
   const logRef = useRef<HTMLDivElement>(null);
+  const esRef  = useRef<EventSource | null>(null);
+
+  useEffect(() => {
+    return () => { esRef.current?.close(); };
+  }, []);
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -126,12 +131,14 @@ export default function EvaluatePage() {
       setRunId(run_id);
 
       const es = new EventSource(`/api/eval/${run_id}/stream`);
+      esRef.current = es;
       es.onmessage = (e) => {
         const data = JSON.parse(e.data);
         if (data.line === "__done__") {
           setStatus(data.status);
           setResult(data.result ?? null);
           es.close();
+          esRef.current = null;
           setRunning(false);
         } else {
           setLogs((p) => [...p, data.line]);
@@ -139,6 +146,7 @@ export default function EvaluatePage() {
       };
       es.onerror = () => {
         es.close();
+        esRef.current = null;
         setRunning(false);
         setStatus("failed");
         setLogs((p) => [...p, "[error] Connection to server lost — check that the API is running"]);

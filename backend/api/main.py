@@ -18,10 +18,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Training Pipeline API", version="1.0.0", lifespan=lifespan)
 
-_frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+_raw_origins = os.getenv("FRONTEND_URL", "http://localhost:3000")
+_allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[_frontend_url],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
