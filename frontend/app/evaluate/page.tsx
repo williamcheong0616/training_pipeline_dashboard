@@ -58,9 +58,14 @@ export default function EvaluatePage() {
     dataset_id: "", dataset_path: "",
     batch_size: 4, max_seq_len: 2048,
     predict_output: "./outputs/predictions.jsonl",
+    // ASR
+    audio_col: "audio_path", text_col: "text", language: "auto", task: "transcribe",
   });
   const set = <K extends keyof typeof form>(k: K, v: typeof form[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
+
+  // Track whether selected/manual source is ASR
+  const [isASR, setIsASR] = useState(false);
 
   // Auto-fill paths when a job is selected
   useEffect(() => {
@@ -68,6 +73,8 @@ export default function EvaluatePage() {
     const job = completedJobs.find((j) => j.id === Number(selectedJobId));
     if (!job) return;
     const { model_path, adapter_path } = resolveJobPaths(job, models);
+    const asr = job.training_method === "asr_whisper";
+    setIsASR(asr);
     setForm((p) => ({ ...p, model_path, adapter_path }));
   }, [selectedJobId, sourceMode, completedJobs, models]);
 
@@ -87,7 +94,7 @@ export default function EvaluatePage() {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logs]);
 
-  const canStart = !!form.model_path && !!(form.dataset_id || form.dataset_path);
+  const canStart = !!form.model_path && !!(isASR ? form.dataset_path : (form.dataset_id || form.dataset_path));
 
   const handleStart = async () => {
     if (!canStart || running) return;
@@ -104,8 +111,15 @@ export default function EvaluatePage() {
         batch_size: form.batch_size,
         max_seq_len: form.max_seq_len,
         predict_output: evalMode === "predict" ? form.predict_output : undefined,
+        is_asr: isASR,
+        ...(isASR && {
+          audio_col: form.audio_col,
+          text_col: form.text_col,
+          language: form.language === "auto" ? null : form.language,
+          task: form.task,
+        }),
       };
-      if (form.dataset_id)   body.dataset_id   = Number(form.dataset_id);
+      if (form.dataset_id)        body.dataset_id   = Number(form.dataset_id);
       else if (form.dataset_path) body.dataset_path = form.dataset_path;
 
       const { run_id } = await startEval(body);
@@ -236,6 +250,17 @@ export default function EvaluatePage() {
         {sourceMode === "manual" && (
           <>
             <div style={{ marginBottom: 8 }}>
+              <label className="lf-label">model type</label>
+              <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+                {([false, true] as const).map((asr) => (
+                  <button key={String(asr)} className={`lf-chip ${isASR === asr ? "lf-chip-active" : ""}`}
+                    style={{ flex: 1, justifyContent: "center" }} onClick={() => setIsASR(asr)}>
+                    {asr ? "ASR (Whisper)" : "LLM"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ marginBottom: 8 }}>
               <label className="lf-label">model path</label>
               <select className="lf-input lf-select" value={form.model_path}
                 onChange={(e) => set("model_path", e.target.value)} style={{ marginBottom: 4 }}>
@@ -260,35 +285,73 @@ export default function EvaluatePage() {
               {QUANT_OPTIONS.map((q) => <option key={q}>{q}</option>)}
             </select>
           </Field>
-          <Field label="template">
-            <select className="lf-input lf-select" value={form.template} onChange={(e) => set("template", e.target.value)}>
-              {TEMPLATES.map((t) => <option key={t}>{t}</option>)}
-            </select>
-          </Field>
+          {!isASR && (
+            <Field label="template">
+              <select className="lf-input lf-select" value={form.template} onChange={(e) => set("template", e.target.value)}>
+                {TEMPLATES.map((t) => <option key={t}>{t}</option>)}
+              </select>
+            </Field>
+          )}
+          {isASR && (
+            <Field label="task">
+              <select className="lf-input lf-select" value={form.task} onChange={(e) => set("task", e.target.value)}>
+                <option value="transcribe">transcribe</option>
+                <option value="translate">translate</option>
+              </select>
+            </Field>
+          )}
         </div>
+
+        {isASR && (
+          <>
+            <div className="lf-row lf-row-2" style={{ marginBottom: 8 }}>
+              <Field label="language">
+                <input className="lf-input" value={form.language} onChange={(e) => set("language", e.target.value)} placeholder="auto / en / ms / zh…" />
+              </Field>
+              <Field label="audio column">
+                <input className="lf-input" value={form.audio_col} onChange={(e) => set("audio_col", e.target.value)} />
+              </Field>
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <Field label="text column (ground truth)">
+                <input className="lf-input" value={form.text_col} onChange={(e) => set("text_col", e.target.value)} />
+              </Field>
+            </div>
+          </>
+        )}
 
         <Section title="Dataset" />
         <div style={{ marginBottom: 8 }}>
-          <label className="lf-label">dataset</label>
-          <select className="lf-input lf-select" value={form.dataset_id}
-            onChange={(e) => set("dataset_id", e.target.value)} style={{ marginBottom: 4 }}>
-            <option value="">— select from registry —</option>
-            {datasets.map((d) => (
-              <option key={d.id} value={d.id}>{d.name} ({d.num_samples?.toLocaleString() ?? "?"})</option>
-            ))}
-          </select>
+          <label className="lf-label">{isASR ? "dataset CSV path" : "dataset"}</label>
+          {!isASR && (
+            <select className="lf-input lf-select" value={form.dataset_id}
+              onChange={(e) => set("dataset_id", e.target.value)} style={{ marginBottom: 4 }}>
+              <option value="">— select from registry —</option>
+              {datasets.map((d) => (
+                <option key={d.id} value={d.id}>{d.name} ({d.num_samples?.toLocaleString() ?? "?"})</option>
+              ))}
+            </select>
+          )}
           <input className="lf-input" value={form.dataset_path}
-            onChange={(e) => set("dataset_path", e.target.value)} placeholder="or enter file path" />
+            onChange={(e) => set("dataset_path", e.target.value)}
+            placeholder={isASR ? "path/to/dataset.csv" : "or enter file path"} />
+          {isASR && (
+            <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", marginTop: 3 }}>
+              CSV must have columns matching audio column + text column above
+            </div>
+          )}
         </div>
 
-        <div className="lf-row lf-row-2" style={{ marginBottom: 8 }}>
-          <Field label="max seq length">
-            <input className="lf-input" type="number" value={form.max_seq_len} onChange={(e) => set("max_seq_len", +e.target.value)} />
-          </Field>
-          <Field label="batch size">
-            <input className="lf-input" type="number" value={form.batch_size} onChange={(e) => set("batch_size", +e.target.value)} />
-          </Field>
-        </div>
+        {!isASR && (
+          <div className="lf-row lf-row-2" style={{ marginBottom: 8 }}>
+            <Field label="max seq length">
+              <input className="lf-input" type="number" value={form.max_seq_len} onChange={(e) => set("max_seq_len", +e.target.value)} />
+            </Field>
+            <Field label="batch size">
+              <input className="lf-input" type="number" value={form.batch_size} onChange={(e) => set("batch_size", +e.target.value)} />
+            </Field>
+          </div>
+        )}
 
         {evalMode === "predict" && (
           <>
@@ -316,6 +379,7 @@ export default function EvaluatePage() {
         {/* Status bar */}
         <div style={{ borderBottom: "1px solid var(--border)", padding: "0 14px", height: 32, display: "flex", alignItems: "center", gap: 14, background: "var(--bg-panel)", flexShrink: 0 }}>
           <span style={{ fontFamily: "var(--mono)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: statusColor[status] ?? "var(--text-dim)" }}>{status}</span>
+          {isASR && <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--accent)", background: "var(--accent-dim)", padding: "1px 5px", borderRadius: 2 }}>ASR · WER</span>}
           {runId && <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>run {runId.slice(0, 8)}</span>}
         </div>
 
@@ -324,6 +388,20 @@ export default function EvaluatePage() {
           <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", background: "var(--bg-panel)", flexShrink: 0 }}>
             <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Results</div>
             <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+              {result.wer != null && (
+                <div>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>WER</div>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 20, fontWeight: 700, color: +result.wer < 20 ? "var(--green)" : +result.wer < 40 ? "var(--amber)" : "var(--red)" }}>
+                    {(+result.wer).toFixed(2)}%
+                  </div>
+                </div>
+              )}
+              {result.n_samples != null && (
+                <div>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>Samples</div>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 20, fontWeight: 700, color: "var(--text-hi)" }}>{String(result.n_samples)}</div>
+                </div>
+              )}
               {result.loss != null && (
                 <div>
                   <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>Loss</div>

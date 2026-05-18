@@ -45,6 +45,12 @@ class EvalRequest(BaseModel):
     max_seq_len: int = 2048
     predict_output: Optional[str] = None
     quantization: Optional[str] = None
+    # ASR-specific
+    is_asr: bool = False
+    audio_col: str = "audio_path"
+    text_col: str = "text"
+    language: Optional[str] = None
+    task: str = "transcribe"
 
 
 def _push(run_id: str, line: str):
@@ -147,6 +153,94 @@ def _run_eval(run_id: str, req: EvalRequest, csv_path: Optional[str]):
         _runs[run_id]["ts"] = datetime.now(timezone.utc).timestamp()
 
 
+def _run_asr_eval(run_id: str, req: EvalRequest, csv_path: Optional[str]):
+    import csv as csv_mod
+    import torch
+    from backend.core.asr.loader import load_whisper_processor, load_whisper_model
+
+    _runs[run_id]["status"] = "running"
+    try:
+        language = req.language if req.language and req.language != "auto" else None
+
+        _push(run_id, f"[eval] Loading Whisper processor from {req.model_path}…")
+        processor = load_whisper_processor(req.model_path, language=language, task=req.task)
+
+        _push(run_id, f"[eval] Loading Whisper model…")
+        model = load_whisper_model(
+            req.model_path, quantization=req.quantization,
+            language=language, task=req.task, processor=processor,
+        )
+
+        if req.adapter_path:
+            from peft import PeftModel
+            _push(run_id, f"[eval] Applying LoRA adapter from {req.adapter_path}…")
+            model = PeftModel.from_pretrained(model, req.adapter_path)
+            model = model.merge_and_unload()
+
+        model.eval()
+
+        data_path = req.dataset_path or csv_path
+        if not data_path or not os.path.exists(data_path):
+            raise FileNotFoundError(f"Dataset CSV not found: {data_path}")
+
+        with open(data_path, newline="", encoding="utf-8-sig") as f:
+            rows = list(csv_mod.DictReader(f))
+        _push(run_id, f"[eval] Loaded {len(rows)} rows from {data_path}")
+
+        import librosa
+
+        if req.mode == "evaluate":
+            import evaluate as hf_eval
+            wer_metric = hf_eval.load("wer")
+            preds, refs = [], []
+            for i, row in enumerate(rows):
+                audio_path = row.get(req.audio_col, "")
+                ref = row.get(req.text_col, "")
+                if not os.path.exists(audio_path):
+                    _push(run_id, f"[warn] Audio not found: {audio_path}"); continue
+                audio, _ = librosa.load(audio_path, sr=16000)
+                feats = processor(audio, sampling_rate=16000, return_tensors="pt").input_features.to(model.device)
+                with torch.no_grad():
+                    ids = model.generate(feats)
+                pred = processor.batch_decode(ids, skip_special_tokens=True)[0]
+                preds.append(pred); refs.append(ref)
+                if (i + 1) % 10 == 0:
+                    _push(run_id, f"[eval] {i+1}/{len(rows)} transcribed…")
+            wer = wer_metric.compute(predictions=preds, references=refs) * 100
+            _push(run_id, f"[eval] Done — WER={wer:.2f}%  ({len(preds)} samples)")
+            _runs[run_id]["result"] = {"wer": round(wer, 4), "n_samples": len(preds)}
+
+        else:
+            out_path = req.predict_output or f"./outputs/asr_predict_{run_id[:8]}.jsonl"
+            os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+            _push(run_id, f"[predict] Output → {out_path}")
+            with open(out_path, "w", encoding="utf-8") as fout:
+                for i, row in enumerate(rows):
+                    audio_path = row.get(req.audio_col, "")
+                    ref = row.get(req.text_col, "")
+                    if not os.path.exists(audio_path):
+                        _push(run_id, f"[warn] Audio not found: {audio_path}"); continue
+                    audio, _ = librosa.load(audio_path, sr=16000)
+                    feats = processor(audio, sampling_rate=16000, return_tensors="pt").input_features.to(model.device)
+                    with torch.no_grad():
+                        ids = model.generate(feats)
+                    pred = processor.batch_decode(ids, skip_special_tokens=True)[0]
+                    fout.write(json.dumps({"audio_path": audio_path, "reference": ref, "prediction": pred}, ensure_ascii=False) + "\n")
+                    if (i + 1) % 10 == 0:
+                        _push(run_id, f"[predict] {i+1}/{len(rows)} done")
+            _push(run_id, f"[predict] Saved {len(rows)} predictions → {out_path}")
+            _runs[run_id]["result"] = {"output_file": out_path, "n_samples": len(rows)}
+
+        _runs[run_id]["status"] = "completed"
+
+    except Exception as e:
+        _push(run_id, f"[error] {e}")
+        _runs[run_id]["status"] = "failed"
+        _runs[run_id]["result"] = {"error": str(e)}
+    finally:
+        _runs[run_id]["ts"] = datetime.now(timezone.utc).timestamp()
+
+
 @router.post("/run")
 def start_eval(req: EvalRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     _cleanup_old_runs()
@@ -164,7 +258,8 @@ def start_eval(req: EvalRequest, background_tasks: BackgroundTasks, db: Session 
         if ds:
             csv_path = ds.path
 
-    background_tasks.add_task(_run_eval, run_id, req, csv_path)
+    fn = _run_asr_eval if req.is_asr else _run_eval
+    background_tasks.add_task(fn, run_id, req, csv_path)
     return {"run_id": run_id}
 
 

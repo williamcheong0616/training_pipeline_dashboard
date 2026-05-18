@@ -41,20 +41,26 @@ def list_exports():
 
 
 def _merge_adapter(adapter_path: str, save_path: str):
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    import json
     from peft import PeftModel
 
-    base_model_name = open(os.path.join(adapter_path, "adapter_config.json")).read()
-    import json
-    cfg = json.loads(base_model_name)
+    cfg = json.loads(open(os.path.join(adapter_path, "adapter_config.json")).read())
     base = cfg.get("base_model_name_or_path", "")
 
-    model = AutoModelForCausalLM.from_pretrained(base, trust_remote_code=True)
-    model = PeftModel.from_pretrained(model, adapter_path)
-    merged = model.merge_and_unload()
-    merged.save_pretrained(save_path)
-    tokenizer = AutoTokenizer.from_pretrained(adapter_path)
-    tokenizer.save_pretrained(save_path)
+    if "whisper" in base.lower():
+        from transformers import WhisperForConditionalGeneration, WhisperProcessor
+        model = WhisperForConditionalGeneration.from_pretrained(base, trust_remote_code=True)
+        model = PeftModel.from_pretrained(model, adapter_path)
+        merged = model.merge_and_unload()
+        merged.save_pretrained(save_path)
+        WhisperProcessor.from_pretrained(adapter_path).save_pretrained(save_path)
+    else:
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        model = AutoModelForCausalLM.from_pretrained(base, trust_remote_code=True)
+        model = PeftModel.from_pretrained(model, adapter_path)
+        merged = model.merge_and_unload()
+        merged.save_pretrained(save_path)
+        AutoTokenizer.from_pretrained(adapter_path).save_pretrained(save_path)
 
 
 @router.post("/from-path")

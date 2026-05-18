@@ -1,7 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getJobs, getExports, exportJob, exportFromPath } from "@/lib/api";
+import { getJobs, getASRJobs, getExports, exportJob, exportFromPath } from "@/lib/api";
 
 type ExportMode = "job" | "path";
 
@@ -14,10 +14,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 export default function ExportPage() {
   const qc = useQueryClient();
-  const { data: jobs = [] } = useQuery({ queryKey: ["jobs"], queryFn: getJobs });
+  const { data: llmJobs = [] } = useQuery({ queryKey: ["jobs"],     queryFn: getJobs });
+  const { data: asrJobs = [] } = useQuery({ queryKey: ["asr-jobs"], queryFn: getASRJobs });
   const { data: exports = [], refetch: refetchExports } = useQuery({ queryKey: ["exports"], queryFn: getExports, refetchInterval: 5000 });
 
-  const completedJobs = jobs.filter((j) => j.status === "completed");
+  const completedJobs = useMemo(
+    () => [...llmJobs, ...asrJobs].filter((j) => j.status === "completed" && j.peft_method !== "sft" && j.peft_method !== "full"),
+    [llmJobs, asrJobs],
+  );
 
   const [mode, setMode] = useState<ExportMode>("job");
   const [form, setForm] = useState({ job_id: "", adapter_path: "", output_name: "" });
@@ -83,7 +87,9 @@ export default function ExportPage() {
               <select className="lf-input lf-select" value={form.job_id} onChange={(e) => set("job_id", e.target.value)}>
                 <option value="">— select job —</option>
                 {completedJobs.map((j) => (
-                  <option key={j.id} value={j.id}>#{j.id} {j.name} ({j.training_method})</option>
+                  <option key={`${j.training_method}-${j.id}`} value={j.id}>
+                    #{j.id} {j.name} [{j.training_method}/{j.peft_method}]
+                  </option>
                 ))}
               </select>
             </Field>
@@ -128,7 +134,7 @@ export default function ExportPage() {
 
         <div style={{ marginTop: 14, fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", lineHeight: 1.8 }}>
           <div style={{ color: "var(--accent)", marginBottom: 4 }}>What this does</div>
-          <div>Loads the base model + LoRA adapter, merges weights via merge_and_unload(), and saves a standalone full-precision model that can be used without PEFT.</div>
+          <div>Loads the base model + LoRA adapter, merges weights via merge_and_unload(), and saves a standalone full-precision model usable without PEFT. Auto-detects Whisper vs LLM from the adapter config.</div>
         </div>
       </div>
 
