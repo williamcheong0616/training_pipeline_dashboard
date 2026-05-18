@@ -23,6 +23,18 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    # Additive migrations for SQLite (safe to re-run — silently ignored if column exists)
+    if DATABASE_URL.startswith("sqlite"):
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            for stmt in [
+                "ALTER TABLE jobs ADD COLUMN remarks TEXT",
+            ]:
+                try:
+                    conn.execute(text(stmt))
+                    conn.commit()
+                except Exception:
+                    pass
 
 
 def get_db():

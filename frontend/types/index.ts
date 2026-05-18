@@ -11,6 +11,7 @@ export interface Job {
   config_json: Record<string, unknown> | null;
   output_dir: string | null;
   error_msg: string | null;
+  remarks: string | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;

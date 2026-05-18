@@ -21,6 +21,7 @@ class Job(Base):
     celery_task_id = Column(String, nullable=True)
     output_dir = Column(String, nullable=True)
     error_msg = Column(Text, nullable=True)
+    remarks = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)

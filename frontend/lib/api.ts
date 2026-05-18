@@ -15,6 +15,10 @@ export const createJob = (body: {
   config: Record<string, unknown>;
 }) => http.post<Job>("/jobs", body).then((r) => r.data);
 export const cancelJob = (id: number) => http.delete(`/jobs/${id}`);
+export const updateJobRemarks = (id: number, remarks: string) =>
+  http.patch<Job>(`/jobs/${id}/remarks`, { remarks }).then((r) => r.data);
+export const getJobMetrics = (id: number) =>
+  http.get<{ id: number; step: number; epoch: number | null; loss: number | null; eval_loss: number | null; learning_rate: number | null; reward: number | null; grad_norm: number | null }[]>(`/jobs/${id}/metrics/all`).then((r) => r.data);
 
 // Models
 export const getModels = () => http.get<ModelEntry[]>("/models").then((r) => r.data);

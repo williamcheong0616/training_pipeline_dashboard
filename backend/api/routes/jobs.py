@@ -36,12 +36,17 @@ class JobResponse(BaseModel):
     config_json: Optional[dict] = None
     output_dir: Optional[str]
     error_msg: Optional[str]
+    remarks: Optional[str] = None
     created_at: datetime
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
 
     class Config:
         from_attributes = True
+
+
+class RemarksUpdate(BaseModel):
+    remarks: str
 
 
 @router.post("", response_model=JobResponse, status_code=201)
@@ -134,3 +139,31 @@ async def stream_metrics(job_id: int, db: Session = Depends(get_db)):
             await asyncio.sleep(2)
 
     return EventSourceResponse(event_generator())
+
+
+@router.get("/{job_id}/metrics/all")
+def get_all_metrics(job_id: int, db: Session = Depends(get_db)):
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    rows = db.query(TrainingMetric).filter(TrainingMetric.job_id == job_id).order_by(TrainingMetric.step).all()
+    return [
+        {
+            "id": r.id, "step": r.step, "epoch": r.epoch,
+            "loss": r.loss, "eval_loss": r.eval_loss,
+            "learning_rate": r.learning_rate, "reward": r.reward,
+            "grad_norm": r.grad_norm,
+        }
+        for r in rows
+    ]
+
+
+@router.patch("/{job_id}/remarks", response_model=JobResponse)
+def update_remarks(job_id: int, body: RemarksUpdate, db: Session = Depends(get_db)):
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job.remarks = body.remarks
+    db.commit()
+    db.refresh(job)
+    return job
