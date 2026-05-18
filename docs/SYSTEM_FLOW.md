@@ -50,33 +50,33 @@
 
 ```mermaid
 flowchart TD
-    A([User fills config form]) --> B[POST /api/jobs or /api/asr/jobs]
-    B --> C{Validate request}
+    A([User fills config form]) --> B[POST /api/jobs]
+    B --> C{"Validate request"}
     C -- invalid --> D[400 Bad Request]
-    C -- valid --> E[Create Job row\nstatus=pending]
-    E --> F[run_training_job.delay job_id\nCelery enqueue]
+    C -- valid --> E["Create Job row — status=pending"]
+    E --> F["run_training_job.delay(job_id) — Celery enqueue"]
     F --> G[Return Job JSON to frontend]
-    G --> H[Frontend opens SSE\nGET /api/jobs/{id}/metrics]
+    G --> H["Frontend opens SSE stream\nGET /api/jobs/id/metrics"]
 
-    subgraph Celery Worker
-        I[Pick up task] --> J[Set status=running\nstarted_at=now]
-        J --> K{training_method?}
-        K -- sft/dpo/lora --> L[LLM Trainer\nSFTTrainer / DPOTrainer]
-        K -- asr_whisper --> M[Whisper Trainer\nSeq2SeqTrainer]
-        L --> N[TrainingMetric rows\nper logging_steps]
+    subgraph CeleryWorker["Celery Worker"]
+        I[Pick up task] --> J["Set status=running, started_at=now"]
+        J --> K{"training_method"}
+        K -- "sft / dpo / lora" --> L["LLM Trainer\nSFTTrainer / DPOTrainer"]
+        K -- asr_whisper --> M["Whisper Trainer\nSeq2SeqTrainer"]
+        L --> N["INSERT TrainingMetric rows\nevery logging_steps"]
         M --> N
-        N --> O{Training done?}
-        O -- success --> P[status=completed\noutput_dir saved]
-        O -- error --> Q[status=failed\nerror_msg saved]
+        N --> O{"Training done"}
+        O -- success --> P["status=completed, output_dir saved"]
+        O -- error --> Q["status=failed, error_msg saved"]
         O -- revoked --> R[status=cancelled]
     end
 
-    H --> S[SSE polls DB every 2s\nyields metric events]
-    S --> T{Job terminal?}
-    T -- yes --> U[yield done event\nclose stream]
+    H --> S["SSE polls DB every 2s\nyields metric events"]
+    S --> T{"Job terminal"}
+    T -- yes --> U["yield done event, close stream"]
     T -- no --> S
 
-    P --> V([User can Export / Evaluate])
+    P --> V([User can Export or Evaluate])
 ```
 
 ---
@@ -91,31 +91,31 @@ sequenceDiagram
     participant Q as Redis/Celery
     participant W as Worker
 
-    UI->>API: POST /api/jobs {model_id, dataset_id, config}
-    API->>DB: INSERT Job (status=pending)
+    UI->>API: POST /api/jobs
+    API->>DB: INSERT Job status=pending
     API->>Q: run_training_job.delay(job_id)
-    API-->>UI: 201 {id, status: "pending"}
+    API-->>UI: 201 Job created
 
-    UI->>API: GET /api/jobs/{id}/metrics (SSE)
+    UI->>API: GET /api/jobs/id/metrics (SSE)
     API-->>UI: SSE stream opened
 
     Q->>W: execute task
     W->>DB: UPDATE status=running, started_at
     W->>W: load_tokenizer(model_path)
     W->>W: load_model(model_path, quant)
-    W->>W: wrap with PeftModel (LoRA/QLoRA)
+    W->>W: wrap with PeftModel LoRA/QLoRA
     W->>W: load dataset CSV/JSONL
     W->>W: SFTTrainer.train()
 
     loop Every logging_steps
-        W->>DB: INSERT TrainingMetric (loss, lr, …)
+        W->>DB: INSERT TrainingMetric (loss, lr, grad_norm)
     end
 
     W->>DB: UPDATE status=completed, output_dir
 
-    API->>DB: SELECT new metrics (every 2s)
+    API->>DB: SELECT new metrics every 2s
     API-->>UI: SSE metric events
-    API-->>UI: SSE event:done
+    API-->>UI: SSE event done
 ```
 
 ---
@@ -124,37 +124,37 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    A([Upload ZIP\nor CSV]) --> B{Upload type}
+    A(["Upload ZIP or CSV"]) --> B{"Upload type"}
 
-    subgraph ZIP Upload
-        B -- ZIP --> C[Extract to datasets/audio/name/]
-        C --> D[Zip-slip guard:\nrealpath prefix check]
+    subgraph ZipUpload["ZIP Upload"]
+        B -- ZIP --> C["Extract to datasets/audio/name/"]
+        C --> D["Zip-slip guard:\nrealpath prefix check"]
         D --> E[Find CSV in extracted dir]
-        E --> F[Rewrite audio paths\nby filename match]
-        F --> G[Save canonical CSV\nto datasets/]
+        E --> F["Rewrite audio paths\nby filename match"]
+        F --> G["Save canonical CSV\nto datasets/"]
     end
 
-    subgraph CSV Upload
-        B -- CSV --> H[Save CSV to datasets/]
+    subgraph CsvUpload["CSV Upload"]
+        B -- CSV --> H["Save CSV to datasets/"]
     end
 
-    G --> I[(Dataset DB row\nformat=asr_csv)]
+    G --> I[("Dataset DB row\nformat=asr_csv")]
     H --> I
 
-    I --> J([Create ASR Job\nPOST /api/asr/jobs])
-    J --> K[Celery: run_training_job]
+    I --> J(["Create ASR Job\nPOST /api/asr/jobs"])
+    J --> K["Celery: run_training_job"]
 
-    subgraph ASR Worker
+    subgraph ASRWorker["ASR Worker"]
         K --> L[load WhisperProcessor]
         L --> M[load WhisperForConditionalGeneration]
-        M --> N[wrap PeftModel - LoRA]
+        M --> N[wrap PeftModel LoRA]
         N --> O[Read CSV rows]
-        O --> P[librosa.load each audio]
+        O --> P["librosa.load each audio"]
         P --> Q[Seq2SeqTrainer.train]
         Q --> R[TrainingMetric rows]
     end
 
-    R --> S([Completed adapter\nin output_dir/])
+    R --> S(["Completed adapter\nin output_dir/"])
 ```
 
 ---
@@ -163,32 +163,36 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    subgraph Text Dataset - JSON/JSONL
+    subgraph TextDataset["Text Dataset — JSON / JSONL"]
         A([Select file]) --> B[Client reads first 3 records]
-        B --> C{Auto-detect format}
-        C -- conversations/messages --> D[sharegpt]
-        C -- prompt+chosen+rejected --> E[dpo]
-        C -- prompt+completion+label --> F[kto]
-        C -- instruction/output --> G[alpaca]
+        B --> C{"Auto-detect format"}
+        C -- "conversations / messages" --> D[sharegpt]
+        C -- "prompt + chosen + rejected" --> E[dpo]
+        C -- "prompt + completion + label" --> F[kto]
+        C -- "instruction / output" --> G[alpaca]
         C -- other --> H[plain_text]
-        D & E & F & G & H --> I[POST /api/datasets\nmultipart form]
-        I --> J[(Dataset row\nformat detected)]
+        D --> I["POST /api/datasets\nmultipart form"]
+        E --> I
+        F --> I
+        G --> I
+        H --> I
+        I --> J[("Dataset row\nformat detected")]
     end
 
-    subgraph ASR Dataset - ZIP
-        K([Select ZIP]) --> L[POST /api/asr/datasets/zip]
+    subgraph ASRZip["ASR Dataset — ZIP"]
+        K([Select ZIP]) --> L["POST /api/asr/datasets/zip"]
         L --> M[Read all bytes into memory]
-        M --> N[Validate each member path\nzip-slip guard]
-        N --> O[Validate CSV exists\nbefore extracting]
-        O --> P[extractall to datasets/audio/name/]
+        M --> N["Validate each member path\nzip-slip guard"]
+        N --> O["Validate CSV exists\nbefore extracting"]
+        O --> P["extractall to datasets/audio/name/"]
         P --> Q[Build audio filename lookup]
-        Q --> R[Rewrite CSV audio_col\nwith absolute paths]
-        R --> S[(Dataset row\nformat=asr_csv)]
+        Q --> R["Rewrite CSV audio_col\nwith absolute paths"]
+        R --> S[("Dataset row\nformat=asr_csv")]
     end
 
-    subgraph ASR Dataset - CSV
-        T([Select CSV\nwith server paths]) --> U[POST /api/asr/datasets]
-        U --> V[(Dataset row\nformat=asr_csv)]
+    subgraph ASRCsv["ASR Dataset — CSV"]
+        T(["Select CSV\nwith server paths"]) --> U["POST /api/asr/datasets"]
+        U --> V[("Dataset row\nformat=asr_csv")]
     end
 ```
 
@@ -198,28 +202,29 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A([User selects model + dataset\nand mode]) --> B{is_asr?}
+    A(["User selects model + dataset + mode"]) --> B{"is_asr"}
 
-    B -- No, LLM --> C[POST /api/eval/run\nis_asr=false]
-    C --> D[BackgroundTask: _run_eval]
-    D --> E[load_tokenizer + load_model]
-    E --> F{mode?}
-    F -- evaluate --> G[DataLoader loop\navg loss + perplexity]
-    F -- predict --> H[model.generate per sample\nwrite JSONL output]
-    G --> I[(result store\nloss, perplexity)]
+    B -- "No, LLM" --> C["POST /api/eval/run\nis_asr=false"]
+    C --> D["BackgroundTask: _run_eval"]
+    D --> E["load_tokenizer + load_model"]
+    E --> F{"mode"}
+    F -- evaluate --> G["DataLoader loop\navg loss + perplexity"]
+    F -- predict --> H["model.generate per sample\nwrite JSONL output"]
+    G --> I[("result store\nloss, perplexity")]
     H --> I
 
-    B -- Yes, ASR --> J[POST /api/eval/run\nis_asr=true]
-    J --> K[BackgroundTask: _run_asr_eval]
-    K --> L[load WhisperProcessor + Model]
-    L --> M[apply PeftModel if adapter]
-    M --> N{mode?}
-    N -- evaluate --> O[librosa.load each audio\nmodel.generate → decode\nevaluate.load WER]
-    N -- predict --> P[generate predictions\nwrite JSONL]
-    O --> Q[(result store\nWER score)]
+    B -- "Yes, ASR" --> J["POST /api/eval/run\nis_asr=true"]
+    J --> K["BackgroundTask: _run_asr_eval"]
+    K --> L["load WhisperProcessor + Model"]
+    L --> M["apply PeftModel if adapter"]
+    M --> N{"mode"}
+    N -- evaluate --> O["librosa.load each audio\nmodel.generate, decode\nevaluate.load WER"]
+    N -- predict --> P["generate predictions\nwrite JSONL"]
+    O --> Q[("result store\nWER score")]
     P --> Q
 
-    I & Q --> R[GET /api/eval/{run_id}/result]
+    I --> R["GET /api/eval/run_id/result"]
+    Q --> R
     R --> S([Frontend shows metrics])
 ```
 
@@ -231,31 +236,33 @@ flowchart TD
 sequenceDiagram
     participant UI as Frontend
     participant API as FastAPI
-    participant State as _chat_state dict
+    participant State as chat_state
     participant GPU as Model/GPU
 
-    UI->>API: POST /api/chat/load {model_path, adapter?, quantization?}
-    API->>State: status = "loading"
+    UI->>API: POST /api/chat/load
+    API->>State: status = loading
     API->>GPU: load_tokenizer + load_model (BackgroundTask)
-    GPU-->>State: model + tokenizer stored, status = "ready"
+    GPU-->>State: model stored, status = ready
 
     loop Poll every 2s
         UI->>API: GET /api/chat/status
-        API-->>UI: {status: "loading"|"ready"}
+        API-->>UI: status loading or ready
     end
 
-    UI->>API: POST /api/chat/generate {messages, temperature, …}
+    UI->>API: POST /api/chat/generate
     API->>GPU: model.generate with TextIteratorStreamer
+
     loop Token streaming
         GPU-->>API: next token via streamer
-        API-->>UI: SSE data: {"token": "…"}
+        API-->>UI: SSE data token
     end
-    API-->>UI: SSE data: {"token": "__done__"}
+
+    API-->>UI: SSE data __done__
 
     UI->>API: POST /api/chat/unload
     API->>State: model = None, tokenizer = None
-    API->>GPU: gc.collect() + cuda.empty_cache()
-    API-->>UI: {message: "unloaded"}
+    API->>GPU: gc.collect + cuda.empty_cache
+    API-->>UI: unloaded
 ```
 
 ---
@@ -264,32 +271,34 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A([Choose source]) --> B{Source type}
+    A([Choose source]) --> B{"Source type"}
 
-    B -- From completed Job --> C[POST /api/exports/{job_id}]
-    C --> D[Validate job.status == completed]
-    D --> E[Validate job.output_dir exists]
+    B -- "From completed Job" --> C["POST /api/exports/job_id"]
+    C --> D["Validate job.status == completed"]
+    D --> E["Validate job.output_dir exists"]
 
-    B -- From adapter path --> F[POST /api/exports/from-path]
-    F --> G[Validate adapter_path is dir]
+    B -- "From adapter path" --> F["POST /api/exports/from-path"]
+    F --> G["Validate adapter_path is dir"]
 
-    E & G --> H[_safe_output_name\nstrip dangerous chars, cap 128]
-    H --> I[_validated_save_path\nos.path.realpath prefix check]
-    I --> J{Path escapes EXPORTS_DIR?}
+    E --> H["_safe_output_name\nstrip dangerous chars, cap 128"]
+    G --> H
+    H --> I["_validated_save_path\nos.path.realpath prefix check"]
+    I --> J{"Path escapes EXPORTS_DIR"}
     J -- Yes --> K[400 Bad Request]
-    J -- No --> L[BackgroundTask: _merge_adapter]
+    J -- No --> L["BackgroundTask: _merge_adapter"]
 
-    subgraph _merge_adapter
-        L --> M[Read adapter_config.json]
-        M --> N{base_model contains whisper?}
-        N -- Yes --> O[WhisperForConditionalGeneration\n+ WhisperProcessor]
-        N -- No --> P[AutoModelForCausalLM\n+ AutoTokenizer]
-        O & P --> Q[PeftModel.from_pretrained\nadapter_path]
+    subgraph MergeAdapter["_merge_adapter"]
+        L --> M["Read adapter_config.json"]
+        M --> N{"base_model contains whisper"}
+        N -- Yes --> O["WhisperForConditionalGeneration\n+ WhisperProcessor"]
+        N -- No --> P["AutoModelForCausalLM\n+ AutoTokenizer"]
+        O --> Q["PeftModel.from_pretrained(adapter_path)"]
+        P --> Q
         Q --> R[model.merge_and_unload]
-        R --> S[save_pretrained to EXPORTS_DIR/name]
+        R --> S["save_pretrained to EXPORTS_DIR/name"]
     end
 
-    S --> T([GET /api/exports\nlists merged dirs])
+    S --> T(["GET /api/exports\nlists merged dirs"])
 ```
 
 ---
@@ -298,12 +307,12 @@ flowchart TD
 
 | Attack Vector | Location | Mitigation |
 |---------------|----------|------------|
-| **Path traversal** in `output_name` | `exports.py` | `_safe_output_name()` strips `[/\\:*?"<>|]`; `_validated_save_path()` uses `realpath()` prefix check |
-| **Zip-slip** in ZIP upload | `asr.py` | Every member path checked: `realpath(join(extract_dir, member)).startswith(realpath(extract_dir) + sep)` |
+| **Path traversal** in `output_name` | `exports.py` | `_safe_output_name()` strips dangerous chars; `_validated_save_path()` uses `realpath()` prefix check |
+| **Zip-slip** in ZIP upload | `asr.py` | Every member path checked with `realpath` before `extractall` |
 | **SSE DB session leak** | `jobs.py`, `asr.py` | Generator opens its own `SessionLocal()` with `finally: db.close()` |
-| **Stale localStorage value** | `ThemeProvider.tsx` | Explicit string equality check: `stored === "light" \|\| stored === "dark"` |
-| **Chat fetch not cleaned up** on unmount | `chat/page.tsx` | `useEffect(() => () => abortRef.current?.abort(), [])` |
-| **Silent chat errors** | `chat/page.tsx` | Non-2xx response body read and appended as `[Error: …]` assistant message |
+| **Stale localStorage value** | `ThemeProvider.tsx` | Explicit equality check: `stored === "light" \|\| stored === "dark"` |
+| **Chat fetch not cleaned up** on unmount | `chat/page.tsx` | `useEffect` cleanup aborts in-flight request via `AbortController` |
+| **Silent chat errors** | `chat/page.tsx` | Non-2xx response body shown as `[Error: …]` assistant message |
 
 ---
 
@@ -311,58 +320,58 @@ flowchart TD
 
 ```
 jobs
-├── id          INTEGER PK
-├── name        TEXT
-├── status      TEXT  (pending/running/completed/failed/cancelled)
-├── training_method TEXT (sft/dpo/kto/asr_whisper/…)
-├── peft_method TEXT  (lora/qlora/dora/full)
-├── model_id    FK → models.id
-├── dataset_id  FK → datasets.id
-├── config_json JSON
-├── output_dir  TEXT
-├── error_msg   TEXT
-├── celery_task_id TEXT
-├── remarks     TEXT  (nullable — user notes)
-├── created_at  DATETIME
-├── started_at  DATETIME
-└── finished_at DATETIME
+├── id              INTEGER PK
+├── name            TEXT
+├── status          TEXT  (pending / running / completed / failed / cancelled)
+├── training_method TEXT  (sft / dpo / kto / asr_whisper / …)
+├── peft_method     TEXT  (lora / qlora / dora / full)
+├── model_id        FK → models.id
+├── dataset_id      FK → datasets.id
+├── config_json     JSON
+├── output_dir      TEXT
+├── error_msg       TEXT
+├── celery_task_id  TEXT
+├── remarks         TEXT  (nullable — user notes)
+├── created_at      DATETIME
+├── started_at      DATETIME
+└── finished_at     DATETIME
 
 training_metrics
-├── id          INTEGER PK
-├── job_id      FK → jobs.id (CASCADE DELETE)
-├── step        INTEGER
-├── epoch       FLOAT
-├── loss        FLOAT
-├── eval_loss   FLOAT
-├── learning_rate FLOAT
-├── reward      FLOAT
-├── grad_norm   FLOAT
-└── timestamp   DATETIME
+├── id              INTEGER PK
+├── job_id          FK → jobs.id (CASCADE DELETE)
+├── step            INTEGER
+├── epoch           FLOAT
+├── loss            FLOAT
+├── eval_loss       FLOAT
+├── learning_rate   FLOAT
+├── reward          FLOAT
+├── grad_norm       FLOAT
+└── timestamp       DATETIME
 
 models
-├── id          INTEGER PK
-├── name        TEXT
-├── hf_repo     TEXT
-├── architecture TEXT
-├── template    TEXT
-├── is_downloaded BOOL
-├── local_path  TEXT
-├── downloaded_at DATETIME
-└── created_at  DATETIME
+├── id              INTEGER PK
+├── name            TEXT
+├── hf_repo         TEXT
+├── architecture    TEXT
+├── template        TEXT
+├── is_downloaded   BOOL
+├── local_path      TEXT
+├── downloaded_at   DATETIME
+└── created_at      DATETIME
 
 datasets
-├── id          INTEGER PK
-├── name        TEXT
-├── path        TEXT
-├── format      TEXT  (alpaca/sharegpt/dpo/kto/plain_text/asr_csv)
-├── num_samples INTEGER
-├── description TEXT
-└── created_at  DATETIME
+├── id              INTEGER PK
+├── name            TEXT
+├── path            TEXT
+├── format          TEXT  (alpaca / sharegpt / dpo / kto / plain_text / asr_csv)
+├── num_samples     INTEGER
+├── description     TEXT
+└── created_at      DATETIME
 ```
 
 ---
 
-## 11. API Reference (Quick)
+## 11. API Reference
 
 | Method | Path | Description |
 |--------|------|-------------|
