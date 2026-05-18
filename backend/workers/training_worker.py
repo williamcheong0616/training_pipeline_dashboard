@@ -25,6 +25,9 @@ def _get_trainer(method: str, job_id: int, config: dict, db_factory):
     if method == "orpo":
         from backend.core.trainer.orpo_trainer import ORPOPipelineTrainer
         return ORPOPipelineTrainer(job_id, config, db_factory)
+    if method == "asr_whisper":
+        from backend.core.asr.trainer import ASRPipelineTrainer
+        return ASRPipelineTrainer(job_id, config, db_factory)
     raise ValueError(f"Unknown training method: {method}")
 
 
