@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import os
 from datetime import datetime
 from typing import List, Optional
@@ -93,23 +94,24 @@ def download_model(model_id: int, background_tasks: BackgroundTasks, db: Session
 
 
 @router.get("/search/hub")
-def search_hub(q: str, limit: int = 10) -> List[HFSearchResult]:
-    from huggingface_hub import HfApi
-    api = HfApi()
-    results = api.list_models(search=q, limit=limit, sort="downloads")
-    return [
-        HFSearchResult(
-            model_id=m.id,
-            pipeline_tag=getattr(m, "pipeline_tag", None),
-            downloads=getattr(m, "downloads", None),
-            likes=getattr(m, "likes", None),
-        )
-        for m in results
-    ]
+async def search_hub(q: str, limit: int = 10) -> List[HFSearchResult]:
+    def _search():
+        from huggingface_hub import HfApi
+        results = HfApi().list_models(search=q, limit=limit, sort="downloads")
+        return [
+            HFSearchResult(
+                model_id=m.id,
+                pipeline_tag=getattr(m, "pipeline_tag", None),
+                downloads=getattr(m, "downloads", None),
+                likes=getattr(m, "likes", None),
+            )
+            for m in results
+        ]
+    return await asyncio.to_thread(_search)
 
 
 @router.delete("/{model_id}", status_code=204)
-def delete_model(model_id: int, db: Session = Depends(get_db)):
+async def delete_model(model_id: int, db: Session = Depends(get_db)):
     entry = db.get(ModelEntry, model_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -118,7 +120,7 @@ def delete_model(model_id: int, db: Session = Depends(get_db)):
     db.commit()
     if local_path and os.path.isdir(local_path):
         import shutil
-        shutil.rmtree(local_path, ignore_errors=True)
+        await asyncio.to_thread(shutil.rmtree, local_path, True)
 
 
 @router.get("/{model_id}/download-status")

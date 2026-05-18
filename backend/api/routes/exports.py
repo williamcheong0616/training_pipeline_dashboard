@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import os
 import re
 from datetime import datetime
@@ -27,18 +28,20 @@ class PathExportRequest(BaseModel):
 
 
 @router.get("")
-def list_exports():
-    entries = []
-    for p in sorted(Path(EXPORTS_DIR).iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-        if p.is_dir():
-            size_mb = sum(f.stat().st_size for f in p.rglob("*") if f.is_file()) / (1024 ** 2)
-            entries.append({
-                "name": p.name,
-                "path": str(p),
-                "size_mb": round(size_mb, 1),
-                "created_at": datetime.fromtimestamp(p.stat().st_mtime).isoformat(),
-            })
-    return entries
+async def list_exports():
+    def _scan():
+        entries = []
+        for p in sorted(Path(EXPORTS_DIR).iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if p.is_dir():
+                size_mb = sum(f.stat().st_size for f in p.rglob("*") if f.is_file()) / (1024 ** 2)
+                entries.append({
+                    "name": p.name,
+                    "path": str(p),
+                    "size_mb": round(size_mb, 1),
+                    "created_at": datetime.fromtimestamp(p.stat().st_mtime).isoformat(),
+                })
+        return entries
+    return await asyncio.to_thread(_scan)
 
 
 def _safe_output_name(raw: str, fallback: str) -> str:

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import json
 import os
 from datetime import datetime
@@ -68,25 +69,26 @@ async def upload_dataset(
 
     safe_filename = os.path.basename(file.filename or "upload")
     dest = os.path.join(DATASETS_DIR, safe_filename)
-    with open(dest, "wb") as f:
-        f.write(content)
 
-    # Parse records for detection + count
-    records: list[dict] = []
-    num_samples: int | None = None
-    try:
-        text = content.decode("utf-8", errors="replace")
-        if safe_filename.endswith(".jsonl"):
-            records = [json.loads(l) for l in text.splitlines() if l.strip()]
-        else:
-            parsed = json.loads(text)
-            records = parsed if isinstance(parsed, list) else [parsed]
-        num_samples = len(records)
-    except Exception:
-        num_samples = None
+    # Move blocking file-write + parse + detect off the event loop
+    def _write_and_parse() -> tuple[list[dict], int | None, dict]:
+        with open(dest, "wb") as fh:
+            fh.write(content)
+        records: list[dict] = []
+        num: int | None = None
+        try:
+            text = content.decode("utf-8", errors="replace")
+            if safe_filename.endswith(".jsonl"):
+                records = [json.loads(ln) for ln in text.splitlines() if ln.strip()]
+            else:
+                parsed = json.loads(text)
+                records = parsed if isinstance(parsed, list) else [parsed]
+            num = len(records)
+        except Exception:
+            pass
+        return records, num, detect_format(records)
 
-    # Server-side format detection
-    detection = detect_format(records)
+    records, num_samples, detection = await asyncio.to_thread(_write_and_parse)
     resolved_format = detection["format"] if format == "auto" else format
 
     entry = Dataset(
@@ -108,7 +110,7 @@ async def upload_dataset(
 
 
 @router.post("/{dataset_id}/convert", response_model=DatasetResponse, status_code=201)
-def convert_dataset_endpoint(
+async def convert_dataset_endpoint(
     dataset_id: int,
     body: ConvertRequest,
     db: Session = Depends(get_db),
@@ -129,31 +131,40 @@ def convert_dataset_endpoint(
             detail=f"Cannot convert {source_fmt!r} → {target_fmt!r}. Valid targets: {valid}",
         )
 
-    # Load + convert
-    try:
-        records = _load_raw(entry.path, source_fmt)
-        converted = convert_dataset(records, source_fmt, target_fmt, body.template_name)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Conversion failed: {exc}")
-
-    if not converted:
-        raise HTTPException(status_code=422, detail="Conversion produced 0 records — check source data and format.")
-
-    # Write output
-    output_name = body.output_name or f"{entry.name}_as_{target_fmt}"
+    # Capture everything needed inside the thread (avoid touching db/entry from a thread)
+    source_path = entry.path
+    source_name = entry.name
+    source_template = entry.template
+    template_name = body.template_name
+    output_name = body.output_name or f"{source_name}_as_{target_fmt}"
     safe_out = os.path.basename(output_name.replace(" ", "_")) + ".jsonl"
     dest = os.path.join(DATASETS_DIR, safe_out)
-    with open(dest, "w", encoding="utf-8") as f:
-        for r in converted:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+    # Move all blocking file I/O + CPU conversion off the event loop
+    def _load_convert_write() -> int:
+        records = _load_raw(source_path, source_fmt)
+        converted = convert_dataset(records, source_fmt, target_fmt, template_name)
+        if not converted:
+            raise ValueError("Conversion produced 0 records — check source data and format.")
+        with open(dest, "w", encoding="utf-8") as fh:
+            for r in converted:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        return len(converted)
+
+    try:
+        num_samples = await asyncio.to_thread(_load_convert_write)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {exc}")
 
     new_entry = Dataset(
         name=output_name,
         path=dest,
         format=target_fmt,
-        template=body.template_name if target_fmt == "plain_text" else entry.template,
-        num_samples=len(converted),
-        description=f"Converted from {entry.name!r} ({source_fmt} → {target_fmt})",
+        template=template_name if target_fmt == "plain_text" else source_template,
+        num_samples=num_samples,
+        description=f"Converted from {source_name!r} ({source_fmt} → {target_fmt})",
     )
     db.add(new_entry)
     db.commit()
@@ -162,35 +173,44 @@ def convert_dataset_endpoint(
 
 
 @router.get("/{dataset_id}/preview")
-def preview_dataset(dataset_id: int, db: Session = Depends(get_db)):
+async def preview_dataset(dataset_id: int, db: Session = Depends(get_db)):
     entry = db.get(Dataset, dataset_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Dataset not found")
     if not os.path.exists(entry.path):
         raise HTTPException(status_code=404, detail="File not found on disk")
+
+    path = entry.path
+    fmt = entry.format
+    total = entry.num_samples
+
+    def _read_samples() -> list:
+        with open(path, encoding="utf-8") as f:
+            if path.endswith(".jsonl"):
+                records = []
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        records.append(json.loads(line))
+                    if len(records) >= 5:
+                        break
+                return records
+            else:
+                data = json.loads(f.read())
+                return data[:5] if isinstance(data, list) else [data]
+
     try:
-        with open(entry.path, encoding="utf-8") as f:
-            content = f.read()
-        if entry.path.endswith(".jsonl"):
-            records = []
-            for line in content.splitlines():
-                line = line.strip()
-                if line:
-                    records.append(json.loads(line))
-                if len(records) >= 5:
-                    break
-        else:
-            data = json.loads(content)
-            records = (data[:5] if isinstance(data, list) else [data])
-        return {
-            "format": entry.format,
-            "total": entry.num_samples,
-            "samples": records,
-            "valid_targets": VALID_TARGETS.get(entry.format, []),
-            "conversion_notes": CONVERSION_NOTES.get(entry.format, {}),
-        }
+        samples = await asyncio.to_thread(_read_samples)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+    return {
+        "format": fmt,
+        "total": total,
+        "samples": samples,
+        "valid_targets": VALID_TARGETS.get(fmt, []),
+        "conversion_notes": CONVERSION_NOTES.get(fmt, {}),
+    }
 
 
 @router.delete("/{dataset_id}", status_code=204)

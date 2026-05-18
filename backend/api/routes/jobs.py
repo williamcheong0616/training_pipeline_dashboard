@@ -149,20 +149,35 @@ async def stream_metrics(job_id: int):
 
 
 @router.get("/{job_id}/metrics/all")
-def get_all_metrics(job_id: int, db: Session = Depends(get_db)):
-    job = db.get(Job, job_id)
-    if not job:
+async def get_all_metrics(job_id: int):
+    def _query():
+        db = SessionLocal()
+        try:
+            job = db.get(Job, job_id)
+            if not job:
+                return None
+            rows = (
+                db.query(TrainingMetric)
+                .filter(TrainingMetric.job_id == job_id)
+                .order_by(TrainingMetric.step)
+                .all()
+            )
+            return [
+                {
+                    "id": r.id, "step": r.step, "epoch": r.epoch,
+                    "loss": r.loss, "eval_loss": r.eval_loss,
+                    "learning_rate": r.learning_rate, "reward": r.reward,
+                    "grad_norm": r.grad_norm,
+                }
+                for r in rows
+            ]
+        finally:
+            db.close()
+
+    result = await asyncio.to_thread(_query)
+    if result is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    rows = db.query(TrainingMetric).filter(TrainingMetric.job_id == job_id).order_by(TrainingMetric.step).all()
-    return [
-        {
-            "id": r.id, "step": r.step, "epoch": r.epoch,
-            "loss": r.loss, "eval_loss": r.eval_loss,
-            "learning_rate": r.learning_rate, "reward": r.reward,
-            "grad_norm": r.grad_norm,
-        }
-        for r in rows
-    ]
+    return result
 
 
 @router.patch("/{job_id}/remarks", response_model=JobResponse)

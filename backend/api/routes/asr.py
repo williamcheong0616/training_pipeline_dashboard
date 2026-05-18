@@ -102,11 +102,13 @@ async def upload_asr_dataset(
 ):
     dest = os.path.join(DATASETS_DIR, f"asr_{file.filename}")
     content = await file.read()
-    with open(dest, "wb") as f:
-        f.write(content)
 
-    # Count rows (minus header)
-    num_samples = max(0, len(content.decode(errors="replace").splitlines()) - 1)
+    def _write_and_count() -> int:
+        with open(dest, "wb") as f:
+            f.write(content)
+        return max(0, len(content.decode(errors="replace").splitlines()) - 1)
+
+    num_samples = await asyncio.to_thread(_write_and_count)
 
     entry = Dataset(
         name=name,
@@ -140,75 +142,87 @@ async def upload_asr_zip(
     if len(zip_bytes) > _MAX_ZIP_BYTES:
         raise HTTPException(status_code=413, detail="ZIP too large — maximum 5 GB")
 
+    def _process_zip() -> tuple[str, int, str]:
+        try:
+            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+                for member in zf.namelist():
+                    member_path = os.path.realpath(os.path.join(extract_dir, member))
+                    if not member_path.startswith(os.path.realpath(extract_dir) + os.sep):
+                        raise ValueError(f"unsafe_path:{member}")
+                csv_names = [
+                    n for n in zf.namelist()
+                    if n.lower().endswith(".csv") and not n.startswith("__MACOSX")
+                ]
+                if not csv_names:
+                    raise ValueError("no_csv")
+                os.makedirs(extract_dir, exist_ok=True)
+                zf.extractall(extract_dir)
+        except zipfile.BadZipFile:
+            raise ValueError("bad_zip")
+        except ValueError:
+            raise
+        except Exception as e:
+            shutil.rmtree(extract_dir, ignore_errors=True)
+            raise ValueError(f"process_error:{e}")
+
+        csv_files = list(Path(extract_dir).rglob("*.csv"))
+        if not csv_files:
+            shutil.rmtree(extract_dir, ignore_errors=True)
+            raise ValueError("no_csv")
+        src_csv = csv_files[0]
+
+        audio_exts = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
+        audio_lookup: dict[str, str] = {}
+        for p in Path(extract_dir).rglob("*"):
+            if p.is_file() and p.suffix.lower() in audio_exts:
+                audio_lookup[p.name.lower()] = str(p.resolve())
+
+        rows: list[dict] = []
+        missing = 0
+        with open(src_csv, newline="", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            fieldnames = list(reader.fieldnames or [])
+            for row in reader:
+                orig = row.get(audio_col, "")
+                fname = Path(orig).name.lower()
+                resolved = audio_lookup.get(fname)
+                if resolved:
+                    row[audio_col] = resolved
+                else:
+                    missing += 1
+                rows.append(row)
+
+        out_csv = os.path.join(DATASETS_DIR, f"asr_{safe_name}.csv")
+        with open(out_csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        missing_note = f"{missing} audio path(s) unresolved — trainer will skip them" if missing else ""
+        return out_csv, len(rows), missing_note
+
     try:
-        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-            # Zip-slip guard: reject any member that escapes the target directory
-            for member in zf.namelist():
-                member_path = os.path.realpath(os.path.join(extract_dir, member))
-                if not member_path.startswith(os.path.realpath(extract_dir) + os.sep):
-                    raise HTTPException(status_code=400, detail=f"Unsafe path in ZIP: {member}")
-            # Validate CSV exists in the manifest BEFORE extracting anything
-            csv_names = [
-                n for n in zf.namelist()
-                if n.lower().endswith(".csv") and not n.startswith("__MACOSX")
-            ]
-            if not csv_names:
-                raise HTTPException(status_code=400, detail="No CSV file found inside ZIP")
-            os.makedirs(extract_dir, exist_ok=True)
-            zf.extractall(extract_dir)
-    except zipfile.BadZipFile:
-        raise HTTPException(status_code=400, detail="Uploaded file is not a valid ZIP archive")
-    except HTTPException:
-        raise
-    except Exception as e:
-        shutil.rmtree(extract_dir, ignore_errors=True)
-        raise HTTPException(status_code=500, detail=f"Failed to process ZIP: {e}")
-
-    # Find the CSV inside the extracted dir
-    csv_files = list(Path(extract_dir).rglob("*.csv"))
-    if not csv_files:
-        shutil.rmtree(extract_dir, ignore_errors=True)
-        raise HTTPException(status_code=400, detail="No CSV file found inside ZIP")
-    src_csv = csv_files[0]
-
-    # Build filename → absolute path lookup for all audio files in the ZIP
-    audio_exts = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
-    audio_lookup: dict[str, str] = {}
-    for p in Path(extract_dir).rglob("*"):
-        if p.is_file() and p.suffix.lower() in audio_exts:
-            audio_lookup[p.name.lower()] = str(p.resolve())
-
-    # Rewrite audio_col paths: match by filename, keep original if not found
-    rows: list[dict] = []
-    missing = 0
-    with open(src_csv, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        fieldnames = list(reader.fieldnames or [])
-        for row in reader:
-            orig = row.get(audio_col, "")
-            fname = Path(orig).name.lower()
-            resolved = audio_lookup.get(fname)
-            if resolved:
-                row[audio_col] = resolved
-            else:
-                missing += 1
-            rows.append(row)
-
-    out_csv = os.path.join(DATASETS_DIR, f"asr_{safe_name}.csv")
-    with open(out_csv, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+        out_csv, num_rows, missing_note = await asyncio.to_thread(_process_zip)
+    except ValueError as exc:
+        msg = str(exc)
+        if msg == "bad_zip":
+            raise HTTPException(status_code=400, detail="Uploaded file is not a valid ZIP archive")
+        elif msg == "no_csv":
+            raise HTTPException(status_code=400, detail="No CSV file found inside ZIP")
+        elif msg.startswith("unsafe_path:"):
+            raise HTTPException(status_code=400, detail=f"Unsafe path in ZIP: {msg[12:]}")
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to process ZIP: {msg.removeprefix('process_error:')}")
 
     desc_parts = [description] if description else []
-    if missing:
-        desc_parts.append(f"{missing} audio path(s) unresolved — trainer will skip them")
+    if missing_note:
+        desc_parts.append(missing_note)
 
     entry = Dataset(
         name=name,
         path=out_csv,
         format="asr_csv",
-        num_samples=len(rows),
+        num_samples=num_rows,
         description="; ".join(desc_parts) or None,
     )
     db.add(entry)
@@ -218,21 +232,30 @@ async def upload_asr_zip(
 
 
 @router.get("/datasets/{dataset_id}/preview")
-def preview_asr_dataset(dataset_id: int, db: Session = Depends(get_db)):
+async def preview_asr_dataset(dataset_id: int, db: Session = Depends(get_db)):
     import csv as csv_mod
     entry = db.get(Dataset, dataset_id)
     if not entry or entry.format != "asr_csv":
         raise HTTPException(status_code=404, detail="ASR dataset not found")
     if not os.path.exists(entry.path):
         raise HTTPException(status_code=404, detail="CSV file not found on disk")
-    try:
-        with open(entry.path, newline="", encoding="utf-8-sig") as f:
+
+    path = entry.path
+    total = entry.num_samples
+
+    def _read():
+        with open(path, newline="", encoding="utf-8-sig") as f:
             reader = csv_mod.DictReader(f)
             rows = [dict(r) for r in reader][:5]
         columns = list(rows[0].keys()) if rows else []
-        return {"total": entry.num_samples, "columns": columns, "samples": rows}
+        return columns, rows
+
+    try:
+        columns, rows = await asyncio.to_thread(_read)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+    return {"total": total, "columns": columns, "samples": rows}
 
 
 @router.delete("/datasets/{dataset_id}", status_code=204)
