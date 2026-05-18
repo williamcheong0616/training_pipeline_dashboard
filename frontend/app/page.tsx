@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createJob, getModels, getDatasets, cancelJob, getSystemStats } from "@/lib/api";
 import { useMetricsStream } from "@/lib/sse";
 import MetricsPanel from "@/components/MetricsPanel";
+import Tooltip from "@/components/Tooltip";
 import type { Job } from "@/types";
 
 const METHODS    = ["sft","unsupervised","dpo","rm","kto","orpo"] as const;
@@ -13,25 +14,31 @@ const QUANT      = ["none","4bit","8bit"] as const;
 const SCHEDULERS = ["cosine","linear","constant","cosine_with_restarts","polynomial"] as const;
 const TARGET_MODS = ["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj","lm_head"] as const;
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, tooltip, children }: { label: string; tooltip?: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="lf-label">{label}</label>
+      <label className="lf-label" style={{ display: "flex", alignItems: "center" }}>
+        {label}{tooltip && <Tooltip text={tooltip} />}
+      </label>
       {children}
     </div>
   );
 }
 
-function Section({ title }: { title: string }) {
-  return <div className="lf-section" style={{ marginTop: 12 }}>{title}</div>;
+function Section({ title, tooltip }: { title: string; tooltip?: string }) {
+  return (
+    <div className="lf-section" style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 0 }}>
+      {title}{tooltip && <Tooltip text={tooltip} />}
+    </div>
+  );
 }
 
-function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+function Toggle({ label, tooltip, checked, onChange }: { label: string; tooltip?: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className="lf-toggle">
+    <label className="lf-toggle" style={{ display: "inline-flex", alignItems: "center" }}>
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
       <span className="lf-toggle-track" />
-      {label}
+      {label}{tooltip && <Tooltip text={tooltip} />}
     </label>
   );
 }
@@ -206,13 +213,13 @@ export default function TrainPage() {
         padding: "10px 12px",
         display: "flex", flexDirection: "column", gap: 0,
       }}>
-        <Section title="Model" />
+        <Section title="Model" tooltip="Configure which pre-trained model to load and how to load it." />
 
         <div className="lf-row lf-row-2" style={{ marginBottom: 8 }}>
-          <Field label="run name">
+          <Field label="run name" tooltip="A label for this training run. Appears in the job list and log output. Does not affect training results.">
             <input className="lf-input" value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="my-sft-run" />
           </Field>
-          <Field label="base model">
+          <Field label="base model" tooltip="The pre-trained model to fine-tune. Must be downloaded first via the Models page. The model's architecture determines which templates and modules are available.">
             <select className="lf-input lf-select" value={form.model_id} onChange={(e) => set("model_id", e.target.value)}>
               <option value="">— select —</option>
               {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -221,17 +228,17 @@ export default function TrainPage() {
         </div>
 
         <div className="lf-row lf-row-3" style={{ marginBottom: 8 }}>
-          <Field label="template">
+          <Field label="template" tooltip="Chat prompt template that wraps instruction/response pairs before tokenization. Must match the model's original training format — a wrong template causes garbled outputs. E.g. llama3 for Meta-Llama-3, chatml for Qwen/Mistral.">
             <select className="lf-input lf-select" value={form.template} onChange={(e) => set("template", e.target.value)}>
               {["alpaca","chatml","llama3","mistral","qwen","phi3","gemma"].map((t) => <option key={t}>{t}</option>)}
             </select>
           </Field>
-          <Field label="quantization">
+          <Field label="quantization" tooltip="Load model weights in reduced precision to save VRAM. 4-bit ≈ 4× VRAM reduction; 8-bit ≈ 2×. Required for fitting 13B+ models on consumer GPUs. Use with QLoRA for best results. None = full precision.">
             <select className="lf-input lf-select" value={form.quantization} onChange={(e) => set("quantization", e.target.value)}>
               {QUANT.map((q) => <option key={q}>{q}</option>)}
             </select>
           </Field>
-          <Field label="device">
+          <Field label="device" tooltip="Which GPU to use for training. Auto selects the first available CUDA device. On multi-GPU machines, pin to a specific GPU to avoid contention with other workloads.">
             <select className="lf-input lf-select" value={form.gpu_id} onChange={(e) => set("gpu_id", e.target.value)}>
               <option value="auto">auto</option>
               {sysStats?.gpu.map((g) => (
@@ -244,13 +251,15 @@ export default function TrainPage() {
           </Field>
         </div>
         <div style={{ marginBottom: 8 }}>
-          <Toggle label="flash attn" checked={form.flash_attention} onChange={(v) => set("flash_attention", v)} />
+          <Toggle label="flash attn" tooltip="FlashAttention-2 recomputes attention in fused CUDA kernels — speeds up training ~20–40% and reduces VRAM on long sequences. Requires Ampere+ GPU (RTX 30xx / A100) and the flash-attn package installed." checked={form.flash_attention} onChange={(v) => set("flash_attention", v)} />
         </div>
 
-        <Section title="Method" />
+        <Section title="Method" tooltip="Choose the training objective and parameter-efficiency strategy." />
 
         <div style={{ marginBottom: 8 }}>
-          <label className="lf-label">training stage</label>
+          <label className="lf-label" style={{ display: "flex", alignItems: "center" }}>
+            training stage<Tooltip text="SFT: supervised fine-tuning on instruction-response pairs (most common). DPO: Direct Preference Optimization — trains on chosen vs rejected pairs without a reward model. RM: trains a reward model for RLHF. KTO: Kahneman-Tversky Optimization, a simpler preference objective. ORPO: Odds Ratio Preference Optimization. Unsupervised: causal LM on raw text." />
+          </label>
           <div className="lf-checkbox-group">
             {METHODS.map((m) => (
               <button key={m} className={`lf-chip ${form.training_method === m ? "lf-chip-active" : ""}`}
@@ -260,7 +269,9 @@ export default function TrainPage() {
         </div>
 
         <div style={{ marginBottom: 8 }}>
-          <label className="lf-label">finetuning type</label>
+          <label className="lf-label" style={{ display: "flex", alignItems: "center" }}>
+            finetuning type<Tooltip text="LoRA: attaches small trainable low-rank matrices — fast, low VRAM, recommended for most cases. QLoRA: LoRA + 4-bit base model — enables 70B+ on 24GB. DoRA: decomposed LoRA, marginally better quality. Full: all weights updated — highest expressiveness but requires full model VRAM." />
+          </label>
           <div className="lf-checkbox-group">
             {PEFT.map((p) => (
               <button key={p} className={`lf-chip ${form.peft_method === p ? "lf-chip-active" : ""}`}
@@ -272,18 +283,20 @@ export default function TrainPage() {
         {form.peft_method !== "full" && (
           <>
             <div className="lf-row lf-row-3" style={{ marginBottom: 8 }}>
-              <Field label="lora rank (r)">
+              <Field label="lora rank (r)" tooltip="Number of trainable dimensions in each LoRA adapter matrix. Higher r = more expressive adapter but more VRAM and slower training. Range: 8–128. Doubling r roughly doubles adapter file size. Start at 16; increase if loss plateaus.">
                 <input className="lf-input" type="number" value={form.lora_r} onChange={(e) => set("lora_r", +e.target.value)} />
               </Field>
-              <Field label="lora alpha">
+              <Field label="lora alpha" tooltip="LoRA scaling factor applied to adapter outputs before adding to the base model. Effective update magnitude = alpha/r. Common convention: alpha = 2×r. Higher alpha makes the adapter more influential relative to frozen weights.">
                 <input className="lf-input" type="number" value={form.lora_alpha} onChange={(e) => set("lora_alpha", +e.target.value)} />
               </Field>
-              <Field label="lora dropout">
+              <Field label="lora dropout" tooltip="Dropout probability applied to LoRA layers during training. Acts as regularization to prevent overfitting on small datasets. Set 0.0 to disable; 0.05–0.1 is typical. Has no effect at inference time.">
                 <input className="lf-input" type="number" step="0.01" value={form.lora_dropout} onChange={(e) => set("lora_dropout", +e.target.value)} />
               </Field>
             </div>
             <div style={{ marginBottom: 8 }}>
-              <label className="lf-label">target modules</label>
+              <label className="lf-label" style={{ display: "flex", alignItems: "center" }}>
+                target modules<Tooltip text="Which attention/FFN weight matrices receive LoRA adapters. q_proj + v_proj is the minimal effective set. Adding k_proj, o_proj, gate_proj, up_proj, down_proj increases adapter capacity at the cost of more VRAM. lm_head targets the output projection." />
+              </label>
               <div className="lf-checkbox-group">
                 {TARGET_MODS.map((mod) => (
                   <button key={mod} className={`lf-chip ${form.target_modules.includes(mod) ? "lf-chip-active" : ""}`}
@@ -294,16 +307,16 @@ export default function TrainPage() {
           </>
         )}
 
-        <Section title="Dataset" />
+        <Section title="Dataset" tooltip="Select training data and how it is tokenized." />
 
         <div className="lf-row lf-row-2" style={{ marginBottom: 8 }}>
-          <Field label="dataset">
+          <Field label="dataset" tooltip="The training dataset registered on the Datasets page. Upload JSON/JSONL files via Datasets ↗ before selecting here.">
             <select className="lf-input lf-select" value={form.dataset_id} onChange={(e) => set("dataset_id", e.target.value)}>
               <option value="">— select —</option>
               {datasets.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.num_samples?.toLocaleString() ?? "?"})</option>)}
             </select>
           </Field>
-          <Field label="format">
+          <Field label="format" tooltip="Parsing format for the dataset. Must match how the data is structured. alpaca: {instruction, input, output}. sharegpt: {conversations: [{from, value}]}. plain_text: {text}. Wrong format causes training on malformed sequences.">
             <select className="lf-input lf-select" value={form.dataset_format} onChange={(e) => set("dataset_format", e.target.value)}>
               {["alpaca","sharegpt","plain_text"].map((f) => <option key={f}>{f}</option>)}
             </select>
@@ -311,74 +324,74 @@ export default function TrainPage() {
         </div>
 
         <div className="lf-row lf-row-2" style={{ marginBottom: 8 }}>
-          <Field label="cutoff / max seq length">
+          <Field label="cutoff / max seq length" tooltip="Maximum token length per training example. Longer sequences are truncated at this limit. VRAM usage scales roughly quadratically with sequence length due to attention. 2048 is a safe default; increase for document-level tasks.">
             <input className="lf-input" type="number" step="128" value={form.max_seq_length} onChange={(e) => set("max_seq_length", +e.target.value)} />
           </Field>
           <div style={{ paddingTop: 16 }}>
-            <Toggle label="packing" checked={form.packing} onChange={(v) => set("packing", v)} />
+            <Toggle label="packing" tooltip="Concatenate multiple short examples into single sequences up to max_seq_length. Eliminates padding waste and greatly improves GPU utilization for short-text datasets. Disable if your examples are already near the length limit." checked={form.packing} onChange={(v) => set("packing", v)} />
           </div>
         </div>
 
-        <Section title="Training Parameters" />
+        <Section title="Training Parameters" tooltip="Hyperparameters that control the optimization process. These have the biggest impact on final model quality." />
 
         <div className="lf-row lf-row-3" style={{ marginBottom: 8 }}>
-          <Field label="learning rate">
+          <Field label="learning rate" tooltip="Step size for the optimizer. Too high → loss spikes or divergence. Too low → slow convergence. Typical range: 1e-4 to 5e-4 for LoRA; 1e-5 to 5e-5 for full fine-tuning. Use cosine scheduler to decay it over training.">
             <input className="lf-input" type="number" step="0.00001" value={form.learning_rate} onChange={(e) => set("learning_rate", +e.target.value)} />
           </Field>
-          <Field label="epochs">
+          <Field label="epochs" tooltip="Number of complete passes through the training dataset. More epochs = more training but higher overfitting risk. Watch eval loss — stop when it stops improving. 1–3 epochs is typical for instruction fine-tuning.">
             <input className="lf-input" type="number" value={form.num_epochs} onChange={(e) => set("num_epochs", +e.target.value)} />
           </Field>
-          <Field label="batch size / device">
+          <Field label="batch size / device" tooltip="Examples processed per GPU per optimizer step. Higher batch = faster training but more VRAM. Effective batch = batch_size × grad_accum_steps × num_GPUs. Keep small (2–8) and use grad accumulation to simulate larger batches.">
             <input className="lf-input" type="number" value={form.batch_size} onChange={(e) => set("batch_size", +e.target.value)} />
           </Field>
         </div>
 
         <div className="lf-row lf-row-3" style={{ marginBottom: 8 }}>
-          <Field label="grad accum steps">
+          <Field label="grad accum steps" tooltip="Accumulate gradients over N mini-batches before updating weights. Simulates a batch size of batch_size × N without extra VRAM. Use when you cannot fit a large batch in GPU memory. Effective batch = batch_size × grad_accum.">
             <input className="lf-input" type="number" value={form.gradient_accumulation_steps} onChange={(e) => set("gradient_accumulation_steps", +e.target.value)} />
           </Field>
-          <Field label="lr scheduler">
+          <Field label="lr scheduler" tooltip="How the learning rate changes over training. Cosine (recommended): smoothly decays to near 0 — best for most tasks. Linear: linear decay. Constant: no decay, useful for very short runs. Cosine with restarts: cyclic — can escape local minima.">
             <select className="lf-input lf-select" value={form.lr_scheduler} onChange={(e) => set("lr_scheduler", e.target.value)}>
               {SCHEDULERS.map((s) => <option key={s}>{s}</option>)}
             </select>
           </Field>
-          <Field label="warmup ratio">
+          <Field label="warmup ratio" tooltip="Fraction of total training steps used to linearly ramp the learning rate from 0 to its peak. Prevents large destabilizing updates at the very start. 0.03–0.1 is typical. Multiply by total steps to get warmup steps.">
             <input className="lf-input" type="number" step="0.01" value={form.warmup_ratio} onChange={(e) => set("warmup_ratio", +e.target.value)} />
           </Field>
         </div>
 
         <div className="lf-row lf-row-4" style={{ marginBottom: 8 }}>
-          <Field label="max grad norm">
+          <Field label="max grad norm" tooltip="Clips the L2 norm of gradients to this value before each weight update. Prevents exploding gradients which cause loss spikes or NaN. 1.0 is the standard default. Reduce to 0.3 if you observe unstable early training.">
             <input className="lf-input" type="number" step="0.1" value={form.max_grad_norm} onChange={(e) => set("max_grad_norm", +e.target.value)} />
           </Field>
-          <Field label="logging steps">
+          <Field label="logging steps" tooltip="Emit training metrics (loss, learning rate, grad norm) to the log every N optimizer steps. Lower values produce finer-grained loss curves but add minor overhead. 10–50 is typical.">
             <input className="lf-input" type="number" value={form.logging_steps} onChange={(e) => set("logging_steps", +e.target.value)} />
           </Field>
-          <Field label="save steps">
+          <Field label="save steps" tooltip="Save a full checkpoint to disk every N steps. Checkpoints allow resuming interrupted training. Combine with save_total_limit to cap disk usage. Large models can be 10–50GB per checkpoint.">
             <input className="lf-input" type="number" value={form.save_steps} onChange={(e) => set("save_steps", +e.target.value)} />
           </Field>
-          <Field label="seed">
+          <Field label="seed" tooltip="Random seed for reproducibility. Controls weight initialization, data shuffling order, and dropout. Using the same seed and config reproduces identical results. Change it to test variance between runs.">
             <input className="lf-input" type="number" value={form.seed} onChange={(e) => set("seed", +e.target.value)} />
           </Field>
         </div>
 
-        <Field label="output dir">
+        <Field label="output dir" tooltip="Directory where checkpoints and the final merged/adapter weights are saved after training. Use a unique path per run to avoid overwriting previous results.">
           <input className="lf-input" value={form.output_dir} onChange={(e) => set("output_dir", e.target.value)} />
         </Field>
 
-        <Section title="Advanced" />
+        <Section title="Advanced" tooltip="Precision and memory optimization settings. Defaults work for most cases." />
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginBottom: 8, paddingTop: 4 }}>
-          <Toggle label="bf16" checked={form.bf16} onChange={(v) => { set("bf16", v); if (v) set("fp16", false); }} />
-          <Toggle label="fp16" checked={form.fp16} onChange={(v) => { set("fp16", v); if (v) set("bf16", false); }} />
-          <Toggle label="grad ckpt" checked={form.gradient_checkpointing} onChange={(v) => set("gradient_checkpointing", v)} />
+          <Toggle label="bf16" tooltip="Train in bfloat16 precision. Recommended for Ampere+ GPUs (RTX 30xx / A100+). Same throughput as fp16 but with a wider dynamic range — avoids NaN losses on very small gradients. Mutually exclusive with fp16." checked={form.bf16} onChange={(v) => { set("bf16", v); if (v) set("fp16", false); }} />
+          <Toggle label="fp16" tooltip="Train in float16 precision. Compatible with Volta/Turing GPUs (V100, RTX 20xx). ~2× faster than fp32 with the same VRAM. Occasionally produces NaN on unstable runs — switch to bf16 if that happens. Mutually exclusive with bf16." checked={form.fp16} onChange={(v) => { set("fp16", v); if (v) set("bf16", false); }} />
+          <Toggle label="grad ckpt" tooltip="Gradient checkpointing trades compute for memory. Instead of storing all intermediate activations, it recomputes them during the backward pass. Reduces VRAM usage by ~30–40% at the cost of ~20% slower training. Essential for fine-tuning large models on limited VRAM." checked={form.gradient_checkpointing} onChange={(v) => set("gradient_checkpointing", v)} />
         </div>
 
         <div className="lf-row lf-row-2" style={{ marginBottom: 8 }}>
-          <Field label="dataloader workers">
+          <Field label="dataloader workers" tooltip="Number of CPU subprocesses used to load and preprocess data in parallel. Higher values keep the GPU fed more consistently. Set to 0 if you see CUDA multiprocessing errors. Diminishing returns above 4.">
             <input className="lf-input" type="number" value={form.dataloader_num_workers} onChange={(e) => set("dataloader_num_workers", +e.target.value)} />
           </Field>
-          <Field label="resume from checkpoint">
+          <Field label="resume from checkpoint" tooltip="Path to a previously saved checkpoint directory to resume training from. The optimizer state and step count are restored so training continues seamlessly. Leave empty to start fresh from the base model.">
             <input className="lf-input" value={form.resume_from_checkpoint} onChange={(e) => set("resume_from_checkpoint", e.target.value)} placeholder="path or empty" />
           </Field>
         </div>
