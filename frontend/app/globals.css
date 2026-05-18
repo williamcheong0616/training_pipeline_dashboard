@@ -5,25 +5,51 @@
 @tailwind utilities;
 
 :root {
-  --bg:        #0d0f14;
-  --bg-panel:  #13161e;
-  --bg-input:  #1a1d27;
-  --bg-hover:  #1f2333;
-  --border:    #252a3a;
-  --border-hi: #353c52;
-  --text:      #c8ccd8;
-  --text-dim:  #5e6478;
-  --text-hi:   #e8eaf0;
-  --accent:    #4a9eff;
-  --accent-dim:#1e3a5c;
-  --green:     #3dd68c;
-  --green-dim: #1a3d2e;
-  --red:       #f05050;
-  --red-dim:   #3d1a1a;
-  --amber:     #e8a820;
-  --amber-dim: #3d2e0a;
-  --mono:      'JetBrains Mono', monospace;
-  --sans:      'IBM Plex Sans', sans-serif;
+  --bg:           #0d0f14;
+  --bg-panel:     #13161e;
+  --bg-input:     #1a1d27;
+  --bg-hover:     #1f2333;
+  --border:       #252a3a;
+  --border-hi:    #353c52;
+  --text:         #c8ccd8;
+  --text-dim:     #5e6478;
+  --text-hi:      #e8eaf0;
+  --accent:       #4a9eff;
+  --accent-dim:   #1e3a5c;
+  --green:        #3dd68c;
+  --green-dim:    #1a3d2e;
+  --red:          #f05050;
+  --red-dim:      #3d1a1a;
+  --amber:        #e8a820;
+  --amber-dim:    #3d2e0a;
+  --console-bg:   #090b10;
+  --console-text: #7ec8a4;
+  --cancelled-bg: #1a1d27;
+  --mono:         'JetBrains Mono', monospace;
+  --sans:         'IBM Plex Sans', sans-serif;
+}
+
+[data-theme="light"] {
+  --bg:           #f4f5f7;
+  --bg-panel:     #ffffff;
+  --bg-input:     #eef0f4;
+  --bg-hover:     #e6e8ef;
+  --border:       #d4d8e4;
+  --border-hi:    #b8bdce;
+  --text:         #3d4259;
+  --text-dim:     #8890a8;
+  --text-hi:      #1a1e2e;
+  --accent:       #2878e0;
+  --accent-dim:   #dbeafe;
+  --green:        #1a9b5c;
+  --green-dim:    #d1fae5;
+  --red:          #d93025;
+  --red-dim:      #fee2e2;
+  --amber:        #b45309;
+  --amber-dim:    #fef3c7;
+  --console-bg:   #1a1d27;
+  --console-text: #5ec98a;
+  --cancelled-bg: #eef0f4;
 }
 
 * { box-sizing: border-box; }
@@ -205,11 +231,11 @@ html, body {
 .lf-badge-pending  { background: var(--amber-dim);  color: var(--amber); }
 .lf-badge-done     { background: var(--green-dim);  color: var(--green); }
 .lf-badge-failed   { background: var(--red-dim);    color: var(--red); }
-.lf-badge-cancelled{ background: #1a1d27;            color: var(--text-dim); }
+.lf-badge-cancelled{ background: var(--cancelled-bg); color: var(--text-dim); }
 
 /* ── Log console ── */
 .lf-console {
-  background: #090b10;
+  background: var(--console-bg);
   border: 1px solid var(--border);
   border-radius: 3px;
   font-family: var(--mono);
@@ -217,7 +243,7 @@ html, body {
   line-height: 1.6;
   padding: 8px 10px;
   overflow-y: auto;
-  color: #7ec8a4;
+  color: var(--console-text);
   white-space: pre-wrap;
   word-break: break-all;
 }
