@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import os
 
 import psutil
 import torch
@@ -17,9 +18,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Training Pipeline API", version="1.0.0", lifespan=lifespan)
 
+_frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[_frontend_url],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

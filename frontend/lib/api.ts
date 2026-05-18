@@ -21,6 +21,9 @@ export const getModels = () => http.get<ModelEntry[]>("/models").then((r) => r.d
 export const registerModel = (body: { name: string; hf_repo: string; architecture?: string; template?: string }) =>
   http.post<ModelEntry>("/models", body).then((r) => r.data);
 export const downloadModel = (id: number) => http.post(`/models/${id}/download`);
+export const getModelDownloadStatus = (id: number) =>
+  http.get<{ is_downloaded: boolean; local_path: string | null; downloaded_at: string | null }>(`/models/${id}/download-status`).then((r) => r.data);
+export const deleteModel = (id: number) => http.delete(`/models/${id}`);
 export const searchHub = (q: string) =>
   http.get<HFSearchResult[]>("/models/search/hub", { params: { q } }).then((r) => r.data);
 

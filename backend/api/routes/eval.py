@@ -4,7 +4,7 @@ import json
 import math
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from threading import Thread
 from typing import Optional
 
@@ -18,8 +18,21 @@ from backend.db.models import Dataset
 
 router = APIRouter(prefix="/api/eval", tags=["eval"])
 
-# In-memory run store: run_id → { status, logs, result }
+# In-memory run store: run_id → { status, logs, result, started_at }
 _runs: dict[str, dict] = {}
+
+_RUN_TTL_SECONDS = 86400  # 24 h
+
+
+def _cleanup_old_runs() -> None:
+    now = datetime.now(timezone.utc).timestamp()
+    stale = [
+        rid for rid, run in list(_runs.items())
+        if run["status"] in ("completed", "failed")
+        and (now - run["ts"]) > _RUN_TTL_SECONDS
+    ]
+    for rid in stale:
+        _runs.pop(rid, None)
 
 
 class EvalRequest(BaseModel):
@@ -130,12 +143,19 @@ def _run_eval(run_id: str, req: EvalRequest, csv_path: Optional[str]):
         _push(run_id, f"[error] {e}")
         _runs[run_id]["status"] = "failed"
         _runs[run_id]["result"] = {"error": str(e)}
+    finally:
+        _runs[run_id]["ts"] = datetime.now(timezone.utc).timestamp()
 
 
 @router.post("/run")
 def start_eval(req: EvalRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    _cleanup_old_runs()
     run_id = str(uuid.uuid4())
-    _runs[run_id] = {"status": "pending", "logs": [], "result": {}, "started_at": datetime.utcnow().isoformat()}
+    _runs[run_id] = {
+        "status": "pending", "logs": [], "result": {},
+        "started_at": datetime.utcnow().isoformat(),
+        "ts": datetime.now(timezone.utc).timestamp(),
+    }
 
     # Resolve dataset_id → path
     csv_path: Optional[str] = None

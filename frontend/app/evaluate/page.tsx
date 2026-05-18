@@ -75,7 +75,12 @@ export default function EvaluatePage() {
           setLogs((p) => [...p, data.line]);
         }
       };
-      es.onerror = () => { es.close(); setRunning(false); setStatus("failed"); };
+      es.onerror = () => {
+        es.close();
+        setRunning(false);
+        setStatus("failed");
+        setLogs((p) => [...p, "[error] Connection to server lost — check that the API is running"]);
+      };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setLogs((p) => [...p, `[error] ${msg}`]);

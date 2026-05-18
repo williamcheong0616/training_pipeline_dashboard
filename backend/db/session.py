@@ -3,7 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from .models import Base
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./training_pipeline.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////app/data/forge.db")
 
 engine = create_engine(
     DATABASE_URL,

@@ -128,6 +128,7 @@ async def stream_metrics(job_id: int, db: Session = Depends(get_db)):
                 }
             current_job = db.get(Job, job_id)
             if current_job and current_job.status in ("completed", "failed", "cancelled"):
+                yield {"event": "done", "data": json.dumps({"status": current_job.status})}
                 break
             await asyncio.sleep(2)
 

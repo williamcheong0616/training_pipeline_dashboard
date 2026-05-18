@@ -127,7 +127,7 @@ export default function ASRPage() {
   const [activeJob, setActiveJob] = useState<Job | null>(null);
   const [logs, setLogs] = useState<string[]>(["[system] ASR module ready. Select a Whisper model and dataset."]);
   const logRef = useRef<HTMLDivElement>(null);
-  const metrics = useMetricsStream(activeJob?.status === "running" ? activeJob.id : null);
+  const metrics = useMetricsStream(activeJob?.status === "running" ? activeJob.id : null, "/api/asr/jobs");
 
   const { data: whisperModels = [] } = useQuery({ queryKey: ["asr-models"], queryFn: getASRModels });
   const { data: datasets = [] } = useQuery({ queryKey: ["asr-datasets"], queryFn: getASRDatasets });

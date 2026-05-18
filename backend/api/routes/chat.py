@@ -2,7 +2,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import json
-from threading import Thread
+from threading import Thread, Lock
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
@@ -20,6 +20,7 @@ _state: dict = {
     "status": "unloaded",   # unloaded | loading | ready | error
     "error": None,
 }
+_lock = Lock()
 
 
 class LoadRequest(BaseModel):
@@ -45,22 +46,27 @@ class GenerateRequest(BaseModel):
 def _load_model(model_path: str, adapter_path: Optional[str], quantization: Optional[str]):
     from backend.core.model.loader import load_model, load_tokenizer
 
-    _state["status"] = "loading"
-    _state["error"] = None
+    with _lock:
+        _state["status"] = "loading"
+        _state["error"] = None
     try:
-        _state["tokenizer"] = load_tokenizer(model_path)
-        _state["model"] = load_model(model_path, quantization=quantization)
+        tokenizer = load_tokenizer(model_path)
+        model = load_model(model_path, quantization=quantization)
         if adapter_path:
             from peft import PeftModel
-            _state["model"] = PeftModel.from_pretrained(_state["model"], adapter_path)
-        _state["model_path"] = model_path
-        _state["adapter_path"] = adapter_path
-        _state["status"] = "ready"
+            model = PeftModel.from_pretrained(model, adapter_path)
+        with _lock:
+            _state["tokenizer"] = tokenizer
+            _state["model"] = model
+            _state["model_path"] = model_path
+            _state["adapter_path"] = adapter_path
+            _state["status"] = "ready"
     except Exception as e:
-        _state["status"] = "error"
-        _state["error"] = str(e)
-        _state["model"] = None
-        _state["tokenizer"] = None
+        with _lock:
+            _state["status"] = "error"
+            _state["error"] = str(e)
+            _state["model"] = None
+            _state["tokenizer"] = None
 
 
 @router.post("/load")
@@ -84,12 +90,13 @@ def get_status():
 @router.post("/unload")
 def unload_model():
     import torch
-    _state["model"] = None
-    _state["tokenizer"] = None
-    _state["model_path"] = None
-    _state["adapter_path"] = None
-    _state["status"] = "unloaded"
-    _state["error"] = None
+    with _lock:
+        _state["model"] = None
+        _state["tokenizer"] = None
+        _state["model_path"] = None
+        _state["adapter_path"] = None
+        _state["status"] = "unloaded"
+        _state["error"] = None
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -116,11 +123,11 @@ def _build_prompt(messages: List[Message], tokenizer) -> str:
 
 @router.post("/generate")
 async def generate(req: GenerateRequest):
-    if _state["status"] != "ready":
-        raise HTTPException(status_code=400, detail=f"Model not ready (status: {_state['status']})")
-
-    model = _state["model"]
-    tokenizer = _state["tokenizer"]
+    with _lock:
+        if _state["status"] != "ready":
+            raise HTTPException(status_code=400, detail=f"Model not ready (status: {_state['status']})")
+        model = _state["model"]
+        tokenizer = _state["tokenizer"]
 
     prompt = _build_prompt(req.messages, tokenizer)
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)

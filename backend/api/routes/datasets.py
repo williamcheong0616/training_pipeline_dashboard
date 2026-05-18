@@ -16,6 +16,9 @@ router = APIRouter(prefix="/api/datasets", tags=["datasets"])
 DATASETS_DIR = os.getenv("DATASETS_DIR", "./datasets")
 os.makedirs(DATASETS_DIR, exist_ok=True)
 
+_MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB
+_ALLOWED_EXTS = {".json", ".jsonl"}
+
 
 class DatasetResponse(BaseModel):
     id: int
@@ -43,8 +46,16 @@ async def upload_dataset(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    dest = os.path.join(DATASETS_DIR, file.filename)
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in _ALLOWED_EXTS:
+        raise HTTPException(status_code=400, detail="Only .json and .jsonl files are accepted")
+
     content = await file.read()
+    if len(content) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File too large — maximum 200 MB")
+
+    safe_filename = os.path.basename(file.filename or "upload")
+    dest = os.path.join(DATASETS_DIR, safe_filename)
     with open(dest, "wb") as f:
         f.write(content)
 
@@ -73,5 +84,11 @@ def delete_dataset(dataset_id: int, db: Session = Depends(get_db)):
     entry = db.get(Dataset, dataset_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Dataset not found")
+    path = entry.path
     db.delete(entry)
     db.commit()
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass

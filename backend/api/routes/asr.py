@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import os
+import shutil
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -127,20 +128,38 @@ async def upload_asr_zip(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
+    _MAX_ZIP_BYTES = 5 * 1024 * 1024 * 1024  # 5 GB
+
     safe_name = name.strip().replace(" ", "_")
     extract_dir = os.path.join(AUDIO_DIR, safe_name)
-    os.makedirs(extract_dir, exist_ok=True)
 
     zip_bytes = await file.read()
+    if len(zip_bytes) > _MAX_ZIP_BYTES:
+        raise HTTPException(status_code=413, detail="ZIP too large — maximum 5 GB")
+
     try:
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            # Validate CSV exists in the manifest BEFORE extracting anything
+            csv_names = [
+                n for n in zf.namelist()
+                if n.lower().endswith(".csv") and not n.startswith("__MACOSX")
+            ]
+            if not csv_names:
+                raise HTTPException(status_code=400, detail="No CSV file found inside ZIP")
+            os.makedirs(extract_dir, exist_ok=True)
             zf.extractall(extract_dir)
     except zipfile.BadZipFile:
         raise HTTPException(status_code=400, detail="Uploaded file is not a valid ZIP archive")
+    except HTTPException:
+        raise
+    except Exception as e:
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=f"Failed to process ZIP: {e}")
 
     # Find the CSV inside the extracted dir
     csv_files = list(Path(extract_dir).rglob("*.csv"))
     if not csv_files:
+        shutil.rmtree(extract_dir, ignore_errors=True)
         raise HTTPException(status_code=400, detail="No CSV file found inside ZIP")
     src_csv = csv_files[0]
 
@@ -195,8 +214,22 @@ def delete_asr_dataset(dataset_id: int, db: Session = Depends(get_db)):
     entry = db.get(Dataset, dataset_id)
     if not entry or entry.format != "asr_csv":
         raise HTTPException(status_code=404, detail="ASR dataset not found")
+    csv_path = entry.path
     db.delete(entry)
     db.commit()
+    # Delete the rewritten CSV
+    if csv_path and os.path.exists(csv_path):
+        try:
+            os.remove(csv_path)
+        except OSError:
+            pass
+    # Delete the extracted audio directory (named after the dataset stem minus "asr_" prefix)
+    if csv_path:
+        stem = os.path.splitext(os.path.basename(csv_path))[0]
+        if stem.startswith("asr_"):
+            audio_dir = os.path.join(AUDIO_DIR, stem[4:])
+            if os.path.isdir(audio_dir):
+                shutil.rmtree(audio_dir, ignore_errors=True)
 
 
 # ── ASR Jobs ─────────────────────────────────────────────────────────────────
@@ -300,6 +333,7 @@ async def stream_asr_metrics(job_id: int, db: Session = Depends(get_db)):
                 }
             current = db.get(Job, job_id)
             if current and current.status in ("completed", "failed", "cancelled"):
+                yield {"event": "done", "data": json.dumps({"status": current.status})}
                 break
             await asyncio.sleep(2)
 

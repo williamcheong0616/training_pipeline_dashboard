@@ -40,7 +40,7 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [generating, setGenerating] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
-  const esRef = useRef<EventSource | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
@@ -75,24 +75,21 @@ export default function ChatPage() {
     setInput("");
     setGenerating(true);
 
-    const body = JSON.stringify({
-      messages: allMsgs,
-      ...genParams,
-    });
+    const body = JSON.stringify({ messages: allMsgs, ...genParams });
 
-    const es = new EventSource(`/api/chat/generate`);
-    // Use fetch+SSE since we need POST with body
-    es.close();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
-    // Use fetch with SSE manually
     const resp = await fetch("/api/chat/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
+      signal: controller.signal,
     });
 
     if (!resp.ok || !resp.body) {
       setGenerating(false);
+      abortRef.current = null;
       return;
     }
 
@@ -100,7 +97,7 @@ export default function ChatPage() {
     const decoder = new TextDecoder();
     let buffer = "";
 
-    const read = async () => {
+    try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -111,7 +108,7 @@ export default function ChatPage() {
           if (line.startsWith("data: ")) {
             try {
               const { token } = JSON.parse(line.slice(6));
-              if (token === "__done__") { setGenerating(false); return; }
+              if (token === "__done__") { setGenerating(false); abortRef.current = null; return; }
               setMessages((p) => {
                 const updated = [...p];
                 updated[updated.length - 1] = {
@@ -120,13 +117,15 @@ export default function ChatPage() {
                 };
                 return updated;
               });
-            } catch { /* ignore parse errors */ }
+            } catch { /* ignore malformed SSE frame */ }
           }
         }
       }
-      setGenerating(false);
-    };
-    read();
+    } catch {
+      // AbortError or network error — leave partial content in place
+    }
+    setGenerating(false);
+    abortRef.current = null;
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -275,11 +274,18 @@ export default function ChatPage() {
               color: "var(--text)", padding: "6px 8px", outline: "none",
             }}
           />
-          <button className="lf-btn lf-btn-primary" style={{ alignSelf: "flex-end", height: 36, padding: "0 16px" }}
-            disabled={!isReady || !input.trim() || generating}
-            onClick={sendMessage}>
-            {generating ? <span className="lf-spin" /> : "Send"}
-          </button>
+          {generating ? (
+            <button className="lf-btn lf-btn-danger" style={{ alignSelf: "flex-end", height: 36, padding: "0 16px" }}
+              onClick={() => { abortRef.current?.abort(); setGenerating(false); }}>
+              ■ Stop
+            </button>
+          ) : (
+            <button className="lf-btn lf-btn-primary" style={{ alignSelf: "flex-end", height: 36, padding: "0 16px" }}
+              disabled={!isReady || !input.trim()}
+              onClick={sendMessage}>
+              Send
+            </button>
+          )}
         </div>
       </div>
     </div>

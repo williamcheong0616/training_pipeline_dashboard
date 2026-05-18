@@ -113,5 +113,21 @@ def delete_model(model_id: int, db: Session = Depends(get_db)):
     entry = db.get(ModelEntry, model_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Model not found")
+    local_path = entry.local_path
     db.delete(entry)
     db.commit()
+    if local_path and os.path.isdir(local_path):
+        import shutil
+        shutil.rmtree(local_path, ignore_errors=True)
+
+
+@router.get("/{model_id}/download-status")
+def get_download_status(model_id: int, db: Session = Depends(get_db)):
+    entry = db.get(ModelEntry, model_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Model not found")
+    return {
+        "is_downloaded": entry.is_downloaded == "true",
+        "local_path": entry.local_path,
+        "downloaded_at": entry.downloaded_at,
+    }
