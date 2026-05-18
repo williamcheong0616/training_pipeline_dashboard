@@ -16,7 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider>
           <Providers>
             <TopNav />
-            <main style={{ flex: 1, overflow: "hidden" }}>{children}</main>
+            <main style={{ flex: 1 }}>{children}</main>
           </Providers>
         </ThemeProvider>
       </body>

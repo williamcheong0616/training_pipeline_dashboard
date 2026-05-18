@@ -239,10 +239,10 @@ export default function ASRPage() {
   const status = activeJob?.status ?? "idle";
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "420px 1fr", height: "calc(100vh - 40px)", overflow: "hidden" }}>
+    <div className="lf-train-layout">
 
       {/* ── LEFT: Config ── */}
-      <div style={{ borderRight: "1px solid var(--border)", overflowY: "auto", padding: "10px 12px" }}>
+      <div className="lf-train-config">
 
         {/* Header badge */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
@@ -511,7 +511,7 @@ export default function ASRPage() {
       </div>
 
       {/* ── RIGHT: Output ── */}
-      <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div className="lf-train-output">
         {/* Status bar */}
         <div style={{
           borderBottom: "1px solid var(--border)", padding: "0 14px", height: 32,

@@ -204,15 +204,10 @@ export default function TrainPage() {
   const status = activeJob?.status ?? "idle";
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "420px 1fr", height: "calc(100vh - 40px)", overflow: "hidden" }}>
+    <div className="lf-train-layout">
 
       {/* ── LEFT: Config ── */}
-      <div style={{
-        borderRight: "1px solid var(--border)",
-        overflowY: "auto",
-        padding: "10px 12px",
-        display: "flex", flexDirection: "column", gap: 0,
-      }}>
+      <div className="lf-train-config" style={{ display: "flex", flexDirection: "column", gap: 0 }}>
         <Section title="Model" tooltip="Configure which pre-trained model to load and how to load it." />
 
         <div className="lf-row lf-row-2" style={{ marginBottom: 8 }}>
@@ -421,7 +416,7 @@ export default function TrainPage() {
       </div>
 
       {/* ── RIGHT: Output ── */}
-      <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div className="lf-train-output">
         {/* Status bar */}
         <div style={{
           borderBottom: "1px solid var(--border)",
