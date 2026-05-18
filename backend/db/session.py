@@ -29,6 +29,7 @@ def init_db():
         with engine.connect() as conn:
             for stmt in [
                 "ALTER TABLE jobs ADD COLUMN remarks TEXT",
+                "ALTER TABLE datasets ADD COLUMN template TEXT",
                 "CREATE INDEX IF NOT EXISTS ix_training_metrics_job_id ON training_metrics (job_id)",
             ]:
                 try:

@@ -69,7 +69,8 @@ class Dataset(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     path = Column(String, nullable=False)
-    format = Column(String, default="alpaca")  # alpaca/sharegpt/custom/plain_text
+    format = Column(String, default="alpaca")  # alpaca/sharegpt/dpo/kto/plain_text/asr_csv
+    template = Column(String, nullable=True)   # chat template associated with the data
     num_samples = Column(Integer, nullable=True)
     description = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

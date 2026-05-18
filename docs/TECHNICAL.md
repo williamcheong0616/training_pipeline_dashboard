@@ -47,6 +47,8 @@ SQLite / PostgreSQL (metrics, jobs, models, datasets)
 - Short-lived tasks (eval, export, chat model load) use FastAPI `BackgroundTasks`.
 - All real-time output (training metrics, eval logs, chat tokens) is delivered via SSE (`text/event-stream`). No WebSockets.
 - ASR and LLM training are completely isolated: separate routes, separate trainer classes, same DB tables discriminated by `training_method` and `format` columns.
+- SSE generators own their own `SessionLocal()` DB session (separate from the request-scoped session) and use `db.query()` instead of `db.get()` to bypass the SQLAlchemy identity map cache — ensuring fresh reads of job status updated by a remote Celery worker.
+- CORS allowed origins are read from `FRONTEND_URL` env var and support comma-separated values for multi-origin deployments.
 
 ---
 
@@ -58,9 +60,9 @@ SQLite / PostgreSQL (metrics, jobs, models, datasets)
 
 ```python
 app = FastAPI(title="Training Pipeline API", version="1.0.0")
-# CORS: allow all origins (restrict in production)
+# CORS: origins from FRONTEND_URL env var (comma-separated)
 # Routers: jobs, models, datasets, exports, asr, eval, chat
-# Lifespan: runs init_db() on startup
+# Lifespan: runs init_db() on startup (creates tables + additive indexes)
 ```
 
 **Health & system:**
@@ -100,6 +102,9 @@ Trainer dispatch table (`_get_trainer`):
 | `orpo` | `ORPOPipelineTrainer` |
 | `asr_whisper` | `ASRPipelineTrainer` |
 
+**Job creation race-condition fix:**
+`create_job` uses `db.flush()` to obtain the primary key before the Celery task is enqueued. If `run_training_job.delay()` raises (e.g. Redis unavailable), the transaction is rolled back. Only after a successful `.delay()` call is the job committed.
+
 ---
 
 ### Core Modules
@@ -136,21 +141,64 @@ class BasePipelineTrainer:
     def train(self): ...  # implemented by subclass
 ```
 
-`MetricLoggingCallback` writes a `TrainingMetric` row to the database after every logging step. The SSE endpoint polls this table and streams new rows to the browser.
+`MetricLoggingCallback` writes a `TrainingMetric` row to the database after every logging step. The SSE endpoint polls this table (using `db.query()` for cache-bypassing reads) and streams new rows to the browser.
 
 #### `backend/core/data/template.py`
 
-Supported prompt templates:
+Supported prompt templates (used at tokenisation time, and optionally baked in at format conversion):
 
-| Template | Format |
-|----------|--------|
-| `alpaca` | `### Instruction:\n{inst}\n\n### Response:\n{output}` |
-| `sharegpt` | Alternating human/gpt conversation turns |
-| `llama3` | `<|start_header_id|>user<|end_header_id|>...` |
-| `mistral` | `[INST] {instruction} [/INST]` |
-| `qwen` | `<|im_start|>user\n...` |
-| `phi3` | `<|user|>\n...<|end|>` |
-| `chatml` | `<|im_start|>system\n...<|im_end|>` |
+| Template | Model family | Human prefix |
+|----------|-------------|--------------|
+| `alpaca` | General | `### Instruction:\n` |
+| `chatml` | Qwen, InternLM | `<\|im_start\|>user\n` |
+| `llama3` | Meta-Llama-3 | `<\|start_header_id\|>user<\|end_header_id\|>\n\n` |
+| `mistral` | Mistral, Mixtral | `[INST] ` |
+| `qwen` | Qwen2 | `<\|im_start\|>user\n` |
+| `phi3` | Phi-3 | `<\|user\|>\n` |
+| `gemma` | Gemma | `<start_of_turn>user\n` |
+
+#### `backend/core/data/detector.py` *(new)*
+
+Server-side format detection by scoring up to 20 sampled records:
+
+```python
+def detect_format(records: list[dict]) -> dict:
+    # Returns { "format": str, "confidence": "high"|"medium"|"low", "scores": dict }
+```
+
+Scoring rules (cumulative per record):
+- `conversations`/`messages` key with list-of-dicts → +3 **sharegpt**
+- `prompt` + `chosen` + `rejected` → +5 **dpo**
+- `prompt` + `completion` + `label` → +5 **kto**
+- `instruction` or `output` → +2 **alpaca**; also has `input` → +1 **alpaca**
+- Only `text` key (≤ 3 total keys) → +2 **plain_text**
+
+Confidence: `high` ≥ 70% share of total score, `medium` ≥ 40%, else `low`.
+
+#### `backend/core/data/converter.py` *(new)*
+
+Format-to-format conversion with a defined compatibility matrix:
+
+| Source | Valid targets |
+|--------|--------------|
+| `alpaca` | `sharegpt`, `plain_text` |
+| `sharegpt` | `alpaca` (first turn), `plain_text` |
+| `dpo` | `sharegpt` (chosen only), `alpaca` (chosen only) |
+| `kto` | `sharegpt` (label=True only), `alpaca` (label=True only) |
+| `plain_text` | `alpaca` (text → instruction) |
+
+When converting to `plain_text`, a `PromptTemplate` is applied and the formatted text is baked into the `{"text": "…"}` field. This is the only case where the template choice matters at conversion time.
+
+#### `backend/core/data/dataset.py`
+
+```python
+_load_raw(path_or_repo, format) → list[dict]   # handles .json, .jsonl, HF Hub
+_alpaca_to_text(row, template) → str
+_sharegpt_to_text(row, template) → str
+_plain_text(row) → str
+build_dataset(path, format, template_name, tokenizer, max_length) → Dataset
+build_plain_text_dataset(path, tokenizer, max_length) → Dataset
+```
 
 #### `backend/core/asr/`
 
@@ -162,13 +210,7 @@ Supported prompt templates:
 | `metrics.py` | `make_compute_metrics()` — WER via `evaluate` + `jiwer` |
 | `trainer.py` | `ASRPipelineTrainer` — orchestrates Seq2SeqTrainer with above components |
 
-**Multilingual / code-mixed mode:**
-
-When `language = None` or `language = "auto"`:
-- `load_whisper_processor()` loads without language forcing
-- `load_whisper_model()` sets `forced_decoder_ids = None` and `generation_config.language = None`
-- Whisper auto-detects language per audio segment at inference time
-- Text normalization in `dataset.py` preserves original casing (not lowercased)
+**Multilingual / code-mixed mode:** When `language = None` or `"auto"`, Whisper auto-detects language per audio segment. `forced_decoder_ids` is set to `None` and text normalization preserves original casing.
 
 ---
 
@@ -183,7 +225,7 @@ When `language = None` or `language = "auto"`:
 | status | String | `pending` / `running` / `completed` / `failed` / `cancelled` |
 | training_method | String | `sft` / `dpo` / `kto` / `orpo` / `rm` / `unsupervised` / `asr_whisper` |
 | peft_method | String | `lora` / `qlora` / `dora` / `full` / `sft` |
-| model_id | FK → model_entries | Optional — null if model_path given directly |
+| model_id | FK → model_entries | Optional |
 | dataset_id | FK → datasets | Optional |
 | config_json | JSON | Full training config dict |
 | celery_task_id | String | For task revocation |
@@ -195,7 +237,7 @@ When `language = None` or `language = "auto"`:
 
 | Column | Type | Notes |
 |--------|------|-------|
-| job_id | FK → jobs | |
+| job_id | FK → jobs | Indexed (`ix_training_metrics_job_id`) |
 | step | Integer | Global training step |
 | epoch | Float | |
 | loss | Float | Training loss |
@@ -221,12 +263,15 @@ When `language = None` or `language = "auto"`:
 | Column | Type | Notes |
 |--------|------|-------|
 | name | String | Display name |
-| path | String | Absolute file path (CSV or JSONL) |
-| format | String | `alpaca` / `sharegpt` / `plain_text` / `custom` / `asr_csv` |
+| path | String | Absolute file path (CSV, JSON, or JSONL) |
+| format | String | `alpaca` / `sharegpt` / `dpo` / `kto` / `plain_text` / `asr_csv` |
+| template | String | Chat template the data was created with (used for auto-fill in training form) |
 | num_samples | Integer | Row count |
-| description | Text | Optional |
+| description | Text | Optional — auto-filled with conversion provenance for converted datasets |
 
-The `format` column is the discriminator between LLM datasets and ASR datasets. `GET /api/datasets` excludes `asr_csv`; `GET /api/asr/datasets` filters to `asr_csv` only.
+The `format` column discriminates LLM vs ASR datasets. `GET /api/datasets` excludes `asr_csv`; `GET /api/asr/datasets` filters to `asr_csv` only.
+
+Selecting a dataset in the LLM training form auto-maps `dataset_format` from `d.format` and `template` from `d.template`, with an "auto" badge on both fields.
 
 ---
 
@@ -242,20 +287,18 @@ All pages use Next.js 14 App Router with `"use client"`.
 | `/asr` | `app/asr/page.tsx` | Whisper ASR training |
 | `/asr/datasets` | `app/asr/datasets/page.tsx` | ASR dataset upload (ZIP or CSV) |
 | `/evaluate` | `app/evaluate/page.tsx` | Evaluate (loss/perplexity) + Predict |
-| `/chat` | `app/chat/page.tsx` | Interactive chat / inference |
+| `/chat` | `app/chat/page.tsx` | Interactive chat / inference with Markdown output |
 | `/export` | `app/export/page.tsx` | Merge adapters + list exported models |
 | `/jobs` | `app/jobs/page.tsx` | All training jobs table |
 | `/jobs/[id]` | `app/jobs/[id]/page.tsx` | Job detail with live Recharts metrics |
 | `/models` | `app/models/page.tsx` | Model registry + HF Hub search + download |
-| `/datasets` | `app/datasets/page.tsx` | Text dataset upload + format guide |
+| `/datasets` | `app/datasets/page.tsx` | Dataset upload (auto-detect), preview, and format conversion |
 
 ### Data Fetching
 
-All API calls go through `frontend/lib/api.ts` (axios instance with `baseURL: "/api"`).
+All API calls go through `frontend/lib/api.ts` (axios instance with `baseURL: "/api"`). The Next.js proxy in `next.config.mjs` rewrites `/api/*` → `http://localhost:8000/api/*`.
 
-The Next.js proxy in `next.config.mjs` rewrites `/api/*` → `http://localhost:8000/api/*`.
-
-React Query is used for all server state:
+React Query manages all server state:
 
 ```typescript
 // Polling example
@@ -267,73 +310,87 @@ useMutation({ mutationFn: createJob, onSuccess: () => qc.invalidateQueries(...) 
 
 ### Real-Time Streaming
 
-Two SSE patterns are used:
-
 **1. Training metrics** (`frontend/lib/sse.ts`):
-
 ```typescript
-export function useMetricsStream(jobId: number | null): Metric[] {
-  // Opens EventSource to /api/jobs/{id}/metrics
-  // Each event is a JSON Metric row
-  // Accumulates into state, returns array
-}
+export function useMetricsStream(jobId: number | null): Metric[]
+// Opens EventSource to /api/jobs/{id}/metrics
+// Accumulates JSON Metric rows into state
 ```
 
-**2. Eval logs & chat tokens** (raw `fetch` + `ReadableStream`):
+**2. Eval logs** — raw `fetch` + `ReadableStream`, SSE lines parsed manually. EventSource stored in a `useRef` and closed on component unmount to prevent leaks.
 
-```typescript
-// Used in /evaluate and /chat pages
-const resp = await fetch("/api/eval/{run_id}/stream");
-const reader = resp.body.getReader();
-// Read chunks, parse SSE lines, update state
-```
-
-**3. Chat token streaming** uses `fetch` POST with `TextIteratorStreamer` on the backend:
-
+**3. Chat token streaming** — `fetch` POST with `TextIteratorStreamer` on the backend:
 ```python
 streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
 Thread(target=model.generate, kwargs={..., "streamer": streamer}).start()
 # SSE generator yields each token from streamer
 ```
+The frontend streams tokens into a `MarkdownMessage` component rendered with `react-markdown` + `remark-gfm` + `rehype-highlight` (github-dark theme), so code blocks, tables, and bold/italic in assistant responses render correctly.
 
 ### Design System
 
-`frontend/app/globals.css` defines a complete `lf-*` CSS class system:
+`frontend/app/globals.css` defines a complete `lf-*` CSS class system with light/dark theme via `data-theme` on `<html>`.
 
+**CSS variables (dark defaults):**
 ```css
-/* Core variables */
 --bg: #0d0f14          /* page background */
---bg-panel: #11141b    /* panel/card background */
---bg-input: #0a0c11    /* input field background */
+--bg-panel: #13161e    /* panel/card background */
+--bg-input: #1a1d27    /* input field background */
+--bg-hover: #1f2333    /* hover state */
+--border: #252a3a      /* default border */
+--border-hi: #353c52   /* highlighted border */
+--text: #c8ccd8        /* body text */
+--text-dim: #5e6478    /* muted text */
+--text-hi: #e8eaf0     /* high-emphasis text */
 --accent: #4a9eff      /* primary blue */
---green: #3ddc84       /* success / running */
---amber: #f59e0b       /* warning / pending */
---red: #ef4444         /* error / danger */
+--accent-dim: #1e3a5c  /* accent background tint */
+--green: #3dd68c       /* success */
+--amber: #e8a820       /* warning */
+--red: #f05050         /* error */
 --mono: 'JetBrains Mono', monospace
+--sans: 'IBM Plex Sans', sans-serif
 ```
 
-Key utility classes:
+**Key utility classes:**
 
 | Class | Usage |
 |-------|-------|
 | `.lf-panel` | Dark bordered container |
-| `.lf-input` | Input field / select |
+| `.lf-input` / `.lf-select` / `.lf-textarea` | Form controls |
+| `.lf-label` | Form field label (monospace, dimmed) |
 | `.lf-btn` | Button base |
 | `.lf-btn-primary` | Blue accent button |
 | `.lf-btn-danger` | Red destructive button |
 | `.lf-btn-ghost` | Transparent outline button |
-| `.lf-chip` | Toggle chip (method/model selector) |
+| `.lf-btn-success` | Green confirm button |
+| `.lf-chip` | Toggle chip (method/module selector) |
 | `.lf-chip-active` | Selected chip state |
 | `.lf-table` | Dense data table |
 | `.lf-console` | Monospace log output panel |
 | `.lf-section` | Section header label |
-| `.lf-label` | Form field label |
 | `.lf-toggle` | Checkbox toggle switch |
-| `.lf-tab` | Navigation tab link |
-| `.lf-tab-active` | Active tab state |
+| `.lf-tab` / `.lf-tab-active` | Navigation tab links |
 | `.lf-spin` | Loading spinner animation |
 | `.lf-badge` | Status/format badge |
-| `.lf-row lf-row-2/3/4` | Responsive grid rows |
+| `.lf-row lf-row-2/3/4` | CSS grid form rows |
+| `.lf-progress-track` / `.lf-progress-fill` | Progress bar |
+| `.lf-tt-wrap` / `.lf-tt-icon` / `.lf-tt-box` | Tooltip — CSS-only hover popover |
+| `.lf-train-layout` / `.lf-train-config` / `.lf-train-output` | Two-column training layout |
+
+**Tooltip system** (`frontend/components/Tooltip.tsx`):
+
+The `Tooltip` component renders a `?` icon with a CSS-only hover popover (no JS positioning). It is used on every training parameter label, section header, and chip button across the LLM and ASR pages. To attach a tooltip to a chip button, wrap the button in `.lf-tt-wrap` with `style={{ marginLeft: 0 }}` and add a `.lf-tt-box` sibling:
+
+```tsx
+<span className="lf-tt-wrap" style={{ marginLeft: 0 }}>
+  <button className="lf-chip">q_proj</button>
+  <span className="lf-tt-box">Query projection — …</span>
+</span>
+```
+
+**Training page layout** (`.lf-train-layout`):
+
+Two-column CSS grid: left config panel scrolls naturally with the page; right output panel is `position: sticky` pinned below the 40px TopNav. This avoids fragmented independent scroll zones. Responsive breakpoints at 1100px (narrow side-by-side) and 820px (stacked).
 
 ---
 
@@ -345,8 +402,11 @@ Key utility classes:
 POST   /api/jobs
 GET    /api/jobs
 GET    /api/jobs/{id}
-DELETE /api/jobs/{id}
-GET    /api/jobs/{id}/metrics   (SSE)
+DELETE /api/jobs/{id}              (cancel — only running jobs)
+DELETE /api/jobs/{id}/purge        (delete record — only terminal jobs)
+PATCH  /api/jobs/{id}/remarks      (body: { remarks })
+GET    /api/jobs/{id}/metrics      (SSE)
+GET    /api/jobs/{id}/metrics/all  (snapshot of all metric rows)
 ```
 
 **POST /api/jobs body:**
@@ -379,6 +439,7 @@ GET    /api/jobs/{id}/metrics   (SSE)
 GET    /api/models
 POST   /api/models
 POST   /api/models/{id}/download
+GET    /api/models/{id}/download-status
 GET    /api/models/search/hub?q=llama
 DELETE /api/models/{id}
 ```
@@ -386,9 +447,42 @@ DELETE /api/models/{id}
 ### Datasets
 
 ```
-GET    /api/datasets              (excludes asr_csv)
-POST   /api/datasets              (multipart: name, format, description, file)
+GET    /api/datasets                     (excludes asr_csv)
+POST   /api/datasets                     (multipart: name, format="auto", description, file)
+GET    /api/datasets/{id}/preview        → { format, total, samples, valid_targets, conversion_notes }
+POST   /api/datasets/{id}/convert        (body: { target_format, template_name, output_name })
 DELETE /api/datasets/{id}
+```
+
+**POST /api/datasets** — format detection:
+- Pass `format=auto` (the default) to let the server detect the format from file content.
+- The response includes `detected_format` and `detection_confidence` ("high" / "medium" / "low").
+- Pass an explicit format to override detection.
+
+**POST /api/datasets/{id}/convert** — format conversion:
+```json
+{
+  "target_format": "sharegpt",
+  "template_name": "alpaca",
+  "output_name": "my_dataset_as_sharegpt"
+}
+```
+- `template_name` is only relevant when `target_format = "plain_text"` — it controls which chat template is baked into the `text` field.
+- Returns a new `DatasetResponse` for the converted dataset (saved as a new JSONL file).
+- Returns 400 if the source→target conversion is not supported.
+
+**GET /api/datasets/{id}/preview** response:
+```json
+{
+  "format": "alpaca",
+  "total": 5000,
+  "samples": [...],
+  "valid_targets": ["sharegpt", "plain_text"],
+  "conversion_notes": {
+    "sharegpt": "Wraps each sample as a two-turn conversation (human/gpt).",
+    "plain_text": "Applies the chosen chat template and bakes it into a text field."
+  }
+}
 ```
 
 ### ASR
@@ -400,7 +494,7 @@ POST   /api/asr/datasets          (CSV manifest)
 POST   /api/asr/datasets/zip      (ZIP with audio + CSV; rewrites audio paths)
 DELETE /api/asr/datasets/{id}
 POST   /api/asr/jobs
-GET    /api/asr/jobs
+GET    /api/asr/jobs?skip=0&limit=50
 GET    /api/asr/jobs/{id}
 DELETE /api/asr/jobs/{id}
 GET    /api/asr/jobs/{id}/metrics (SSE)
@@ -412,7 +506,7 @@ GET    /api/asr/jobs/{id}/metrics (SSE)
 - `text_col` — CSV column name for transcripts (default: `text`)
 - `file` — `.zip` file
 
-The ZIP must contain at least one `.csv` file and audio files (`.wav`, `.mp3`, `.flac`, `.ogg`, `.m4a`). Audio paths in the CSV are matched by filename — the original machine paths do not need to match.
+The ZIP must contain at least one `.csv` and audio files (`.wav`, `.mp3`, `.flac`, `.ogg`, `.m4a`). Audio paths in the CSV are matched by filename — original machine paths are rewritten automatically.
 
 ### Evaluate
 
@@ -434,15 +528,7 @@ GET  /api/eval/{run_id}/stream    (SSE log lines)
 }
 ```
 
-**Result (evaluate mode):**
-```json
-{ "status": "completed", "loss": 1.23, "perplexity": 3.42 }
-```
-
-**Result (predict mode):**
-```json
-{ "status": "completed", "output_file": "./outputs/predict_abc123.jsonl", "num_samples": 500 }
-```
+Predict output files default to `OUTPUTS_DIR/predict_<run_id[:8]>.jsonl` (configurable via `OUTPUTS_DIR` env var).
 
 ### Chat
 
@@ -453,32 +539,7 @@ POST /api/chat/unload
 POST /api/chat/generate           (SSE token stream)
 ```
 
-**POST /api/chat/load body:**
-```json
-{ "model_path": "meta-llama/Meta-Llama-3-8B-Instruct", "quantization": "4bit" }
-```
-
-**GET /api/chat/status response:**
-```json
-{ "status": "ready", "model_path": "...", "adapter_path": null, "error": null }
-```
-
-**POST /api/chat/generate body:**
-```json
-{
-  "messages": [
-    { "role": "system", "content": "You are a helpful assistant." },
-    { "role": "user", "content": "Hello!" }
-  ],
-  "max_new_tokens": 512,
-  "temperature": 0.7,
-  "top_p": 0.9,
-  "top_k": 50,
-  "repetition_penalty": 1.1
-}
-```
-
-**SSE token stream:** Each event is `{"token": "Hello"}`. Stream ends with `{"token": "__done__"}`.
+**POST /api/chat/generate** SSE: each event is `{"token": "Hello"}`. Stream ends with `{"token": "__done__"}`. The frontend renders streamed tokens through `react-markdown` so Markdown in model output is formatted.
 
 ### Exports
 
@@ -487,6 +548,8 @@ GET  /api/exports
 POST /api/exports/{job_id}        (body: { "output_name": "..." })
 POST /api/exports/from-path       (body: { "adapter_path": "...", "output_name": "..." })
 ```
+
+Both export endpoints validate the output name for path traversal (no `../` or absolute paths).
 
 ---
 
@@ -500,17 +563,17 @@ POST /api/exports/from-path       (body: { "adapter_path": "...", "output_name":
 | `num_epochs` | int | 3 | Training epochs |
 | `batch_size` | int | 4 | Per-device train batch |
 | `gradient_accumulation_steps` | int | 4 | Grad accumulation |
-| `lr_scheduler` | string | `cosine` | cosine / linear / constant |
-| `warmup_ratio` | float | 0.05 | Warmup fraction |
+| `lr_scheduler` | string | `cosine` | cosine / linear / constant / cosine_with_restarts / polynomial |
+| `warmup_ratio` | float | 0.05 | Warmup fraction of total steps |
 | `max_grad_norm` | float | 1.0 | Gradient clipping |
 | `lora_r` | int | 16 | LoRA rank |
-| `lora_alpha` | int | 32 | LoRA alpha (scaling) |
+| `lora_alpha` | int | 32 | LoRA alpha (scaling = alpha/r) |
 | `lora_dropout` | float | 0.05 | LoRA dropout |
 | `target_modules` | list | model-specific | Which linear layers to adapt |
-| `max_seq_length` | int | 2048 | Maximum token length |
+| `max_seq_length` | int | 2048 | Maximum token length (truncation) |
 | `bf16` | bool | true | bfloat16 precision |
 | `fp16` | bool | false | float16 precision |
-| `gradient_checkpointing` | bool | true | Memory saving |
+| `gradient_checkpointing` | bool | true | Trade speed for VRAM |
 | `output_dir` | string | `./outputs/...` | Checkpoint save path |
 
 ### Training Config Keys (ASR)
@@ -518,14 +581,15 @@ POST /api/exports/from-path       (body: { "adapter_path": "...", "output_name":
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `model_path` | string | — | Whisper model ID or local path |
-| `language` | string | `null` | `null`/`"auto"` for multilingual, or `"malay"`, `"english"`, etc. |
+| `language` | string | `null` | `null`/`"auto"` = multilingual auto-detect; or `"malay"`, `"english"`, etc. |
 | `task` | string | `transcribe` | `transcribe` or `translate` |
 | `training_method` | string | `lora` | `sft` / `lora` / `qlora` |
-| `max_steps` | int | 3000 | Training steps (use_max_steps=true) |
+| `max_steps` | int | 3000 | Training steps (when use_max_steps=true) |
 | `warmup_steps` | int | 500 | Warmup steps |
 | `predict_with_generate` | bool | true | WER evaluation using generation |
 | `generation_max_length` | int | 225 | Max decode length |
 | `eval_steps` | int | 500 | Eval every N steps |
+| `load_best_model_at_end` | bool | true | Save checkpoint with best WER |
 
 ---
 
@@ -558,6 +622,13 @@ python -m forge export \
 ## Adding a New Training Method
 
 1. Create `backend/core/trainer/my_trainer.py` extending `BasePipelineTrainer`
-2. Implement `train()` using a TRL trainer; the `MetricLoggingCallback` (from `self.callback`) will handle DB writes automatically
+2. Implement `train()` using a TRL trainer; `self.callback` (`MetricLoggingCallback`) handles DB writes automatically
 3. Register in `backend/workers/training_worker.py` inside `_get_trainer()`
 4. Add the method name to the `METHODS` constant in `frontend/app/page.tsx`
+5. Add a tooltip description to `METHOD_TIPS` in `frontend/app/page.tsx`
+
+## Adding a New Dataset Format
+
+1. Add detection rules in `backend/core/data/detector.py` (`_score_records`)
+2. Add conversion functions in `backend/core/data/converter.py` and register in `VALID_TARGETS`
+3. Add the format string to `FORMATS` in `frontend/app/datasets/page.tsx` upload panel

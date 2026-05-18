@@ -28,9 +28,9 @@ class DatasetResponse(BaseModel):
     name: str
     path: str
     format: str
-    template: Optional[str]
-    num_samples: Optional[int]
-    description: Optional[str]
+    template: Optional[str] = None
+    num_samples: Optional[int] = None
+    description: Optional[str] = None
     created_at: datetime
     detected_format: Optional[str] = None
     detection_confidence: Optional[str] = None

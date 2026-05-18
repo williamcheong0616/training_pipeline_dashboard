@@ -13,11 +13,13 @@ Forge is a self-hosted, browser-based training platform for fine-tuning large la
 | **ASR Training** | Whisper fine-tuning (SFT, LoRA, QLoRA) with WER tracking |
 | **Multilingual** | Auto-detect language mode for code-mixed / Bahasa Rojak data |
 | **Evaluate** | Perplexity eval + batch prediction on any dataset |
-| **Chat** | Interactive inference with streaming token output |
+| **Chat** | Interactive inference with streaming token output + Markdown rendering |
 | **Export** | Merge LoRA adapters into standalone full models |
 | **Job Queue** | Celery + Redis async training with SSE real-time logs |
 | **Model Registry** | HuggingFace Hub search, download, and local model tracking |
-| **Dataset Upload** | JSON / JSONL for LLM; CSV manifest or ZIP-with-audio for ASR |
+| **Dataset Upload** | JSON / JSONL with server-side format auto-detection |
+| **Format Conversion** | Convert between alpaca / sharegpt / dpo / kto / plain_text in the browser |
+| **Smart Auto-fill** | Selecting a dataset auto-maps its format and template in the training form |
 
 ---
 
@@ -77,7 +79,7 @@ training_pipeline_dashboard/
 │   │   └── routes/
 │   │       ├── jobs.py          # Training job CRUD + SSE metrics
 │   │       ├── models.py        # Model registry + HF Hub download
-│   │       ├── datasets.py      # Text dataset upload/list
+│   │       ├── datasets.py      # Text dataset upload/list/convert
 │   │       ├── exports.py       # Adapter merge + export listing
 │   │       ├── asr.py           # ASR datasets, jobs, Whisper models
 │   │       ├── eval.py          # Evaluate (perplexity) + Predict
@@ -86,7 +88,11 @@ training_pipeline_dashboard/
 │   │   ├── trainer/             # SFT, DPO, KTO, ORPO, RM, Unsupervised
 │   │   ├── asr/                 # Whisper trainer, dataset, collator, metrics
 │   │   ├── model/               # Model/tokenizer loader, LoRA adapter
-│   │   └── data/                # Dataset builders, prompt templates
+│   │   └── data/
+│   │       ├── template.py      # Prompt templates (alpaca, llama3, chatml, …)
+│   │       ├── dataset.py       # Dataset builders + tokenisation
+│   │       ├── detector.py      # Server-side format auto-detection
+│   │       └── converter.py     # Format conversion (alpaca↔sharegpt, dpo→…)
 │   ├── workers/                 # Celery app + training task dispatcher
 │   ├── db/                      # SQLAlchemy models + session
 │   ├── cli/                     # Typer CLI (train / eval / export)
@@ -97,20 +103,22 @@ training_pipeline_dashboard/
 │   │   ├── page.tsx             # LLM training tab
 │   │   ├── asr/                 # ASR training tab + dataset upload
 │   │   ├── evaluate/            # Evaluate & Predict tab
-│   │   ├── chat/                # Chat / inference tab
+│   │   ├── chat/                # Chat / inference tab (Markdown output)
 │   │   ├── export/              # Export / merge tab
 │   │   ├── jobs/                # Job list + job detail with live charts
 │   │   ├── models/              # Model registry
-│   │   └── datasets/            # Text dataset management
+│   │   └── datasets/            # Text dataset management + conversion
 │   ├── components/
 │   │   ├── TopNav.tsx           # Tab navigation + running job badge
-│   │   └── MetricsPanel.tsx     # Recharts loss/lr/WER curves
+│   │   ├── MetricsPanel.tsx     # Recharts loss/lr/WER curves
+│   │   └── Tooltip.tsx          # Reusable hover tooltip (? icon + popover)
 │   └── lib/
 │       ├── api.ts               # Typed API client (axios)
 │       └── sse.ts               # SSE hook for live metrics
 ├── docs/
 │   ├── TECHNICAL.md             # Architecture & API reference
-│   └── USER_GUIDE.md            # End-to-end usage guide
+│   ├── USER_GUIDE.md            # End-to-end usage guide
+│   └── SYSTEM_FLOW.md           # Mermaid system flow diagrams
 └── docker-compose.yml
 ```
 
@@ -139,6 +147,7 @@ Pre-registered in `config/model_registry.yaml`:
 
 - [Technical Documentation](docs/TECHNICAL.md) — architecture, API reference, database schema, configuration
 - [User Guide](docs/USER_GUIDE.md) — step-by-step usage for all tabs
+- [System Flow](docs/SYSTEM_FLOW.md) — Mermaid diagrams for training, eval, chat, and export flows
 
 ---
 
@@ -151,6 +160,8 @@ Pre-registered in `config/model_registry.yaml`:
 | `DATASETS_DIR` | `./datasets` | Where uploaded datasets are stored |
 | `MODELS_DIR` | `./models` | Where downloaded models are stored |
 | `EXPORTS_DIR` | `./exports` | Where merged models are saved |
+| `OUTPUTS_DIR` | `./outputs` | Where eval/predict output files are written |
+| `FRONTEND_URL` | `http://localhost:3000` | CORS allowed origin(s) — comma-separate multiple |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Frontend → backend base URL |
 
 ---
