@@ -19,6 +19,11 @@ venv/
 frontend/node_modules/
 frontend/.next/
 frontend/out/
+frontend/tsconfig.tsbuildinfo
+
+# ── Local scripts ─────────────────────────────────────────────────────────────
+*.py
+!backend/**/*.py
 
 # ── ML artifacts (large binaries — never commit) ──────────────────────────────
 models/
