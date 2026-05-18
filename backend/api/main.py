@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.db.session import init_db
-from backend.api.routes import jobs, models, datasets, exports
+from backend.api.routes import jobs, models, datasets, exports, asr, eval as eval_routes, chat
 
 
 @asynccontextmanager
@@ -29,6 +29,9 @@ app.include_router(jobs.router)
 app.include_router(models.router)
 app.include_router(datasets.router)
 app.include_router(exports.router)
+app.include_router(asr.router)
+app.include_router(eval_routes.router)
+app.include_router(chat.router)
 
 
 @app.get("/api/health")

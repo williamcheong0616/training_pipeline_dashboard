@@ -33,6 +33,41 @@ export const deleteDataset = (id: number) => http.delete(`/datasets/${id}`);
 // Exports
 export const exportJob = (jobId: number, output_name?: string) =>
   http.post(`/exports/${jobId}`, { output_name }).then((r) => r.data);
+export const exportFromPath = (body: { adapter_path: string; output_name?: string }) =>
+  http.post("/exports/from-path", body).then((r) => r.data);
+export const getExports = () => http.get<{ name: string; path: string; size_mb: number; created_at: string }[]>("/exports").then((r) => r.data);
+
+// Eval
+export const startEval = (body: Record<string, unknown>) =>
+  http.post<{ run_id: string }>("/eval/run", body).then((r) => r.data);
+export const getEvalResult = (runId: string) =>
+  http.get<{ status: string; loss?: number; perplexity?: number; output_file?: string; error?: string }>(`/eval/${runId}/result`).then((r) => r.data);
+
+// Chat
+export const loadChatModel = (body: { model_path: string; adapter_path?: string; quantization?: string }) =>
+  http.post("/chat/load", body).then((r) => r.data);
+export const getChatStatus = () =>
+  http.get<{ status: string; model_path: string | null; adapter_path: string | null; error: string | null }>("/chat/status").then((r) => r.data);
+export const unloadChatModel = () => http.post("/chat/unload").then((r) => r.data);
 
 // System
 export const getSystemStats = () => http.get<SystemStats>("/system").then((r) => r.data);
+
+// ASR
+export const getASRModels = () => http.get<{ id: string; params: string }[]>("/asr/models").then((r) => r.data);
+export const getASRDatasets = () => http.get<Dataset[]>("/asr/datasets").then((r) => r.data);
+export const uploadASRDataset = (form: FormData) =>
+  http.post<Dataset>("/asr/datasets", form, { headers: { "Content-Type": "multipart/form-data" } }).then((r) => r.data);
+export const deleteASRDataset = (id: number) => http.delete(`/asr/datasets/${id}`);
+export const uploadASRZip = (form: FormData) =>
+  http.post<Dataset>("/asr/datasets/zip", form, { headers: { "Content-Type": "multipart/form-data" } }).then((r) => r.data);
+export const getASRJobs = () => http.get<Job[]>("/asr/jobs").then((r) => r.data);
+export const getASRJob = (id: number) => http.get<Job>(`/asr/jobs/${id}`).then((r) => r.data);
+export const createASRJob = (body: {
+  name: string;
+  peft_method: string;
+  dataset_id?: number;
+  val_dataset_id?: number;
+  config: Record<string, unknown>;
+}) => http.post<Job>("/asr/jobs", body).then((r) => r.data);
+export const cancelASRJob = (id: number) => http.delete(`/asr/jobs/${id}`);
