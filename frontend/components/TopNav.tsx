@@ -39,6 +39,21 @@ function MiniBar({ pct }: { pct: number }) {
   );
 }
 
+function MetricsSkeleton() {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, fontFamily: "var(--mono)", fontSize: 10 }}>
+      {["CPU", "RAM", "GPU"].map((label) => (
+        <span key={label} style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--text-dim)", opacity: 0.4 }}>
+          <span>{label}</span>
+          <span style={{ display: "inline-block", width: 32, height: 4, borderRadius: 2, background: "var(--bg-input)" }} />
+          <span style={{ minWidth: 28 }}>--</span>
+        </span>
+      ))}
+      <span style={{ width: 1, height: 14, background: "var(--border)", display: "inline-block" }} />
+    </div>
+  );
+}
+
 function SystemMetrics({ stats }: { stats: SystemStats }) {
   const cpuPct   = Math.round(stats.cpu_percent);
   const ramPct   = Math.round((stats.ram_used_mb / stats.ram_total_mb) * 100);
@@ -137,7 +152,7 @@ export default function TopNav() {
 
       {/* Right side: system metrics + training status */}
       <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", paddingRight: 14, gap: 10 }}>
-        {stats && <SystemMetrics stats={stats} />}
+        {stats ? <SystemMetrics stats={stats} /> : <MetricsSkeleton />}
         <TrainingDot running={running > 0} />
       </div>
     </header>

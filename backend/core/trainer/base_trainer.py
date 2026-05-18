@@ -48,6 +48,16 @@ class BasePipelineTrainer(abc.ABC):
     @abc.abstractmethod
     def train(self) -> None: ...
 
+    def _device_map(self) -> str:
+        """Return a HuggingFace device_map value from the job config's gpu_id field."""
+        gpu_id = self.config.get("gpu_id", "auto")
+        if gpu_id and str(gpu_id) != "auto":
+            try:
+                return f"cuda:{int(gpu_id)}"
+            except (ValueError, TypeError):
+                pass
+        return "auto"
+
     def _training_args(self, output_dir: str, **overrides) -> TrainingArguments:
         cfg = self.config
         return TrainingArguments(

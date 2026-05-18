@@ -1,7 +1,7 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { createASRJob, cancelASRJob, getASRModels, getASRDatasets } from "@/lib/api";
+import { createASRJob, cancelASRJob, getASRModels, getASRDatasets, getSystemStats } from "@/lib/api";
 import { useMetricsStream } from "@/lib/sse";
 import MetricsPanel from "@/components/MetricsPanel";
 import type { Job } from "@/types";
@@ -48,6 +48,7 @@ type FormState = {
   task: string;
   language: string;
   quantization: string;
+  gpu_id: string;
   training_method: string;
   lora_r: number;
   lora_alpha: number;
@@ -83,7 +84,7 @@ type FormState = {
 
 const DEFAULT: FormState = {
   name: "", model_path: "openai/whisper-large-v3",
-  task: "transcribe", language: "auto", quantization: "none",
+  task: "transcribe", language: "auto", quantization: "none", gpu_id: "auto",
   training_method: "lora",
   lora_r: 32, lora_alpha: 64, lora_dropout: 0.1,
   target_modules: ["q_proj", "v_proj"],
@@ -129,8 +130,9 @@ export default function ASRPage() {
   const logRef = useRef<HTMLDivElement>(null);
   const metrics = useMetricsStream(activeJob?.status === "running" ? activeJob.id : null, "/api/asr/jobs");
 
-  const { data: whisperModels = [] } = useQuery({ queryKey: ["asr-models"], queryFn: getASRModels });
-  const { data: datasets = [] } = useQuery({ queryKey: ["asr-datasets"], queryFn: getASRDatasets });
+  const { data: whisperModels = [] } = useQuery({ queryKey: ["asr-models"],  queryFn: getASRModels });
+  const { data: datasets = [] }      = useQuery({ queryKey: ["asr-datasets"], queryFn: getASRDatasets });
+  const { data: sysStats }           = useQuery({ queryKey: ["system"],       queryFn: getSystemStats, refetchInterval: 5000 });
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
@@ -181,6 +183,7 @@ export default function ASRPage() {
         fp16: form.fp16,
         bf16: form.bf16,
         gradient_checkpointing: form.gradient_checkpointing,
+        gpu_id: form.gpu_id === "auto" ? null : form.gpu_id,
         output_dir: form.output_dir,
       },
     }),
@@ -271,6 +274,17 @@ export default function ASRPage() {
           <Field label="quantization">
             <select className="lf-input lf-select" value={form.quantization} onChange={(e) => set("quantization", e.target.value)}>
               {QUANT_OPTIONS.map((q) => <option key={q}>{q}</option>)}
+            </select>
+          </Field>
+          <Field label="device">
+            <select className="lf-input lf-select" value={form.gpu_id} onChange={(e) => set("gpu_id", e.target.value)}>
+              <option value="auto">auto</option>
+              {sysStats?.gpu.map((g) => (
+                <option key={g.index} value={String(g.index)}>
+                  GPU {g.index} ({(g.total_mb / 1024).toFixed(0)}GB)
+                </option>
+              ))}
+              {!sysStats?.cuda_available && <option value="cpu" disabled>CPU only</option>}
             </select>
           </Field>
         </div>

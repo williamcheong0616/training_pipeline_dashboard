@@ -45,6 +45,7 @@ class ASRPipelineTrainer(BasePipelineTrainer):
         model = load_whisper_model(
             model_path,
             quantization=cfg.get("quantization"),
+            device_map=self._device_map(),
             language=language,
             task=task,
             processor=processor,

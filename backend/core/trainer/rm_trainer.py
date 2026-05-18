@@ -18,7 +18,8 @@ class RMPipelineTrainer(BasePipelineTrainer):
 
         tokenizer = load_tokenizer(model_path)
         model = AutoModelForSequenceClassification.from_pretrained(
-            model_path, num_labels=1, trust_remote_code=True
+            model_path, num_labels=1, trust_remote_code=True,
+            device_map=self._device_map(),
         )
         model = patch_model(model)
 

@@ -23,6 +23,7 @@ class SFTPipelineTrainer(BasePipelineTrainer):
             model_path,
             quantization=cfg.get("quantization"),
             use_flash_attention=cfg.get("use_flash_attention", False),
+            device_map=self._device_map(),
         )
         model = patch_model(model, gradient_checkpointing=True)
 

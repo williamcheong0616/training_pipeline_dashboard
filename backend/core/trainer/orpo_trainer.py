@@ -18,7 +18,7 @@ class ORPOPipelineTrainer(BasePipelineTrainer):
         output_dir = cfg.get("output_dir", f"outputs/job_{self.job_id}")
 
         tokenizer = load_tokenizer(model_path)
-        model = load_model(model_path, quantization=cfg.get("quantization"))
+        model = load_model(model_path, quantization=cfg.get("quantization"), device_map=self._device_map())
         model = patch_model(model)
 
         if peft_method in ("lora", "qlora", "dora"):

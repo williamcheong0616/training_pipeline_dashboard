@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { createJob, getModels, getDatasets, cancelJob } from "@/lib/api";
+import { createJob, getModels, getDatasets, cancelJob, getSystemStats } from "@/lib/api";
 import { useMetricsStream } from "@/lib/sse";
 import MetricsPanel from "@/components/MetricsPanel";
 import type { Job } from "@/types";
@@ -41,6 +41,7 @@ type FormState = {
   model_id: string;
   template: string;
   quantization: string;
+  gpu_id: string;
   flash_attention: boolean;
   training_method: string;
   peft_method: string;
@@ -71,7 +72,7 @@ type FormState = {
 };
 
 const DEFAULT: FormState = {
-  name: "", model_id: "", template: "alpaca", quantization: "none",
+  name: "", model_id: "", template: "alpaca", quantization: "none", gpu_id: "auto",
   flash_attention: false, training_method: "sft", peft_method: "lora",
   lora_r: 16, lora_alpha: 32, lora_dropout: 0.05,
   target_modules: ["q_proj","v_proj"],
@@ -93,8 +94,9 @@ export default function TrainPage() {
   const logRef = useRef<HTMLDivElement>(null);
   const metrics = useMetricsStream(activeJob?.status === "running" ? activeJob.id : null);
 
-  const { data: models = [] } = useQuery({ queryKey: ["models"], queryFn: getModels });
+  const { data: models = [] }   = useQuery({ queryKey: ["models"],   queryFn: getModels });
   const { data: datasets = [] } = useQuery({ queryKey: ["datasets"], queryFn: getDatasets });
+  const { data: sysStats }      = useQuery({ queryKey: ["system"],   queryFn: getSystemStats, refetchInterval: 5000 });
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
@@ -142,6 +144,7 @@ export default function TrainPage() {
           save_steps: form.save_steps,
           seed: form.seed,
           output_dir: form.output_dir,
+          gpu_id: form.gpu_id === "auto" ? null : form.gpu_id,
           bf16: form.bf16,
           fp16: form.fp16,
           gradient_checkpointing: form.gradient_checkpointing,
@@ -228,9 +231,20 @@ export default function TrainPage() {
               {QUANT.map((q) => <option key={q}>{q}</option>)}
             </select>
           </Field>
-          <div style={{ paddingTop: 16 }}>
-            <Toggle label="flash attn" checked={form.flash_attention} onChange={(v) => set("flash_attention", v)} />
-          </div>
+          <Field label="device">
+            <select className="lf-input lf-select" value={form.gpu_id} onChange={(e) => set("gpu_id", e.target.value)}>
+              <option value="auto">auto</option>
+              {sysStats?.gpu.map((g) => (
+                <option key={g.index} value={String(g.index)}>
+                  GPU {g.index} ({(g.total_mb / 1024).toFixed(0)}GB)
+                </option>
+              ))}
+              {!sysStats?.cuda_available && <option value="cpu" disabled>CPU only</option>}
+            </select>
+          </Field>
+        </div>
+        <div style={{ marginBottom: 8 }}>
+          <Toggle label="flash attn" checked={form.flash_attention} onChange={(v) => set("flash_attention", v)} />
         </div>
 
         <Section title="Method" />
