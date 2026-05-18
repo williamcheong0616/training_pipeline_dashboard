@@ -167,3 +167,13 @@ def update_remarks(job_id: int, body: RemarksUpdate, db: Session = Depends(get_d
     db.commit()
     db.refresh(job)
     return job
+
+
+@router.delete("/{job_id}/purge", status_code=204)
+def purge_job(job_id: int, db: Session = Depends(get_db)):
+    """Permanently remove a job and all its metrics from the database."""
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    db.delete(job)
+    db.commit()

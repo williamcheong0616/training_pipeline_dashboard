@@ -1,7 +1,7 @@
 "use client";
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getJobs, getASRJobs, getJobMetrics, updateJobRemarks } from "@/lib/api";
+import { getJobs, getASRJobs, getJobMetrics, updateJobRemarks, purgeJob } from "@/lib/api";
 import type { Job, JobStatus } from "@/types";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -282,8 +282,18 @@ type FilterStatus = "all" | JobStatus;
 type FilterType   = "all" | "llm" | "asr";
 
 export default function HistoryPage() {
+  const qc = useQueryClient();
   const { data: llmJobs = [] } = useQuery({ queryKey: ["jobs"],     queryFn: getJobs,    refetchInterval: 8000 });
   const { data: asrJobs = [] } = useQuery({ queryKey: ["asr-jobs"], queryFn: getASRJobs, refetchInterval: 8000 });
+
+  const { mutate: doDelete } = useMutation({
+    mutationFn: purgeJob,
+    onSuccess: (_data, deletedId) => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["asr-jobs"] });
+      setSelectedId((prev) => (prev === deletedId ? null : prev));
+    },
+  });
 
   const allJobs = useMemo(
     () => [...llmJobs, ...asrJobs].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
@@ -360,19 +370,36 @@ export default function HistoryPage() {
             const isASR = j.training_method === "asr_whisper";
             const active = j.id === selectedId;
             return (
-              <div key={j.id} onClick={() => setSelectedId(j.id)}
+              <div key={j.id}
                 style={{
+                  position: "relative",
                   padding: "8px 10px",
                   borderBottom: "1px solid var(--border)",
                   background: active ? "var(--bg-hover)" : "transparent",
                   cursor: "pointer",
                   borderLeft: active ? "2px solid var(--accent)" : "2px solid transparent",
                   transition: "background 0.1s",
-                }}>
+                }}
+                onClick={() => setSelectedId(j.id)}
+              >
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
                   <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>#{j.id}</span>
                   <span style={{ fontFamily: "var(--mono)", fontSize: 12, fontWeight: 500, color: "var(--text-hi)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.name}</span>
                   <Badge status={j.status} />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm(`Delete job #${j.id} "${j.name}" permanently?`)) doDelete(j.id);
+                    }}
+                    title="Delete permanently"
+                    style={{
+                      background: "none", border: "none", cursor: "pointer",
+                      color: "var(--text-dim)", padding: "2px 4px", borderRadius: 2,
+                      fontFamily: "var(--mono)", fontSize: 12, lineHeight: 1, flexShrink: 0,
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = "var(--red)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-dim)")}
+                  >✕</button>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: isASR ? "var(--accent)" : "var(--text-dim)", background: isASR ? "var(--accent-dim)" : undefined, padding: isASR ? "0 4px" : 0, borderRadius: 2 }}>
