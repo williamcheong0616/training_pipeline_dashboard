@@ -1,10 +1,14 @@
 "use client";
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getModels, getDatasets, startEval } from "@/lib/api";
+import { getModels, getDatasets, getJobs, getASRJobs, startEval } from "@/lib/api";
+import type { Job, ModelEntry } from "@/types";
 
 const QUANT_OPTIONS = ["none", "4bit", "8bit"] as const;
 const TEMPLATES     = ["alpaca", "sharegpt", "llama3", "mistral", "qwen", "phi3", "chatml"] as const;
+
+type EvalMode   = "evaluate" | "predict";
+type SourceMode = "from_job" | "base_model" | "manual";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><label className="lf-label">{label}</label>{children}</div>;
@@ -13,13 +17,42 @@ function Section({ title }: { title: string }) {
   return <div className="lf-section" style={{ marginTop: 12 }}>{title}</div>;
 }
 
-type EvalMode = "evaluate" | "predict";
+function resolveJobPaths(
+  job: Job,
+  models: ModelEntry[],
+): { model_path: string; adapter_path: string } {
+  const cfg = job.config_json ?? {};
+  const isLoraLike = ["lora", "qlora", "dora"].includes(job.peft_method);
+
+  if (job.training_method === "asr_whisper") {
+    const base = String(cfg.model_path ?? "");
+    return isLoraLike && job.output_dir
+      ? { model_path: base, adapter_path: job.output_dir + "/final_adapter" }
+      : { model_path: job.output_dir ? job.output_dir + "/final_model" : base, adapter_path: "" };
+  }
+
+  const reg = models.find((m) => m.id === job.model_id);
+  const base = reg?.local_path || reg?.hf_repo || String(cfg.model_path ?? "");
+  return isLoraLike && job.output_dir
+    ? { model_path: base, adapter_path: job.output_dir + "/final_adapter" }
+    : { model_path: job.output_dir ? job.output_dir + "/final_model" : base, adapter_path: "" };
+}
 
 export default function EvaluatePage() {
-  const { data: models = [] } = useQuery({ queryKey: ["models"], queryFn: getModels });
-  const { data: datasets = [] } = useQuery({ queryKey: ["datasets"], queryFn: getDatasets });
+  const { data: models = [] }   = useQuery({ queryKey: ["models"],    queryFn: getModels });
+  const { data: datasets = [] } = useQuery({ queryKey: ["datasets"],  queryFn: getDatasets });
+  const { data: llmJobs = [] }  = useQuery({ queryKey: ["jobs"],      queryFn: getJobs });
+  const { data: asrJobs = [] }  = useQuery({ queryKey: ["asr-jobs"],  queryFn: getASRJobs });
 
-  const [mode, setMode] = useState<EvalMode>("evaluate");
+  const completedJobs = useMemo(
+    () => [...llmJobs, ...asrJobs].filter((j) => j.status === "completed"),
+    [llmJobs, asrJobs],
+  );
+
+  const [evalMode,   setEvalMode]   = useState<EvalMode>("evaluate");
+  const [sourceMode, setSourceMode] = useState<SourceMode>("from_job");
+  const [selectedJobId, setSelectedJobId] = useState("");
+
   const [form, setForm] = useState({
     model_path: "", adapter_path: "", quantization: "none", template: "alpaca",
     dataset_id: "", dataset_path: "",
@@ -29,40 +62,55 @@ export default function EvaluatePage() {
   const set = <K extends keyof typeof form>(k: K, v: typeof form[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
 
+  // Auto-fill paths when a job is selected
+  useEffect(() => {
+    if (sourceMode !== "from_job" || !selectedJobId) return;
+    const job = completedJobs.find((j) => j.id === Number(selectedJobId));
+    if (!job) return;
+    const { model_path, adapter_path } = resolveJobPaths(job, models);
+    setForm((p) => ({ ...p, model_path, adapter_path }));
+  }, [selectedJobId, sourceMode, completedJobs, models]);
+
+  // Clear adapter path when switching to base_model mode
+  useEffect(() => {
+    if (sourceMode === "base_model") setForm((p) => ({ ...p, adapter_path: "" }));
+  }, [sourceMode]);
+
   const [running, setRunning] = useState(false);
-  const [runId, setRunId] = useState<string | null>(null);
-  const [logs, setLogs] = useState<string[]>(["[system] Select a model and dataset, then start evaluation."]);
-  const [result, setResult] = useState<Record<string, unknown> | null>(null);
-  const [status, setStatus] = useState("idle");
+  const [runId,   setRunId]   = useState<string | null>(null);
+  const [logs,    setLogs]    = useState<string[]>(["[system] Select a source and dataset, then start evaluation."]);
+  const [result,  setResult]  = useState<Record<string, unknown> | null>(null);
+  const [status,  setStatus]  = useState("idle");
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logs]);
 
+  const canStart = !!form.model_path && !!(form.dataset_id || form.dataset_path);
+
   const handleStart = async () => {
-    if (!form.model_path) return;
+    if (!canStart || running) return;
     setRunning(true);
     setResult(null);
-    setLogs([`[system] Starting ${mode}…`]);
+    setLogs([`[system] Starting ${evalMode}…`]);
     setStatus("running");
     try {
       const body: Record<string, unknown> = {
         model_path: form.model_path,
         adapter_path: form.adapter_path || undefined,
         quantization: form.quantization === "none" ? null : form.quantization,
-        mode,
+        mode: evalMode,
         batch_size: form.batch_size,
         max_seq_len: form.max_seq_len,
-        predict_output: mode === "predict" ? form.predict_output : undefined,
+        predict_output: evalMode === "predict" ? form.predict_output : undefined,
       };
-      if (form.dataset_id) body.dataset_id = Number(form.dataset_id);
+      if (form.dataset_id)   body.dataset_id   = Number(form.dataset_id);
       else if (form.dataset_path) body.dataset_path = form.dataset_path;
 
       const { run_id } = await startEval(body);
       setRunId(run_id);
 
-      // SSE stream
       const es = new EventSource(`/api/eval/${run_id}/stream`);
       es.onmessage = (e) => {
         const data = JSON.parse(e.data);
@@ -93,41 +141,118 @@ export default function EvaluatePage() {
     idle: "var(--text-dim)", running: "var(--accent)", completed: "var(--green)", failed: "var(--red)",
   };
 
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "420px 1fr", height: "calc(100vh - 40px)", overflow: "hidden" }}>
+  const selectedJob = completedJobs.find((j) => j.id === Number(selectedJobId));
 
-      {/* LEFT */}
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "430px 1fr", height: "calc(100vh - 40px)", overflow: "hidden" }}>
+
+      {/* ── LEFT ── */}
       <div style={{ borderRight: "1px solid var(--border)", overflowY: "auto", padding: "10px 12px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
           <span style={{ fontFamily: "var(--mono)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--accent)", background: "var(--accent-dim)", padding: "2px 7px", borderRadius: 2 }}>Evaluate & Predict</span>
         </div>
 
-        {/* Mode */}
+        {/* Eval mode */}
         <div style={{ marginBottom: 10 }}>
           <label className="lf-label">mode</label>
           <div style={{ display: "flex", gap: 4 }}>
             {(["evaluate", "predict"] as EvalMode[]).map((m) => (
-              <button key={m} className={`lf-chip ${mode === m ? "lf-chip-active" : ""}`} style={{ flex: 1, justifyContent: "center" }}
-                onClick={() => setMode(m)}>{m}</button>
+              <button key={m} className={`lf-chip ${evalMode === m ? "lf-chip-active" : ""}`}
+                style={{ flex: 1, justifyContent: "center" }} onClick={() => setEvalMode(m)}>{m}</button>
             ))}
           </div>
         </div>
 
-        <Section title="Model" />
-        <div style={{ marginBottom: 8 }}>
-          <label className="lf-label">model</label>
-          <select className="lf-input lf-select" value={form.model_path} onChange={(e) => set("model_path", e.target.value)} style={{ marginBottom: 4 }}>
-            <option value="">— select registered model —</option>
-            {models.map((m) => <option key={m.id} value={m.local_path || m.hf_repo}>{m.name}</option>)}
-          </select>
-          <input className="lf-input" value={form.model_path} onChange={(e) => set("model_path", e.target.value)} placeholder="or enter path / HF repo" />
+        <Section title="Source" />
+
+        {/* Source mode toggle */}
+        <div style={{ marginBottom: 10 }}>
+          <label className="lf-label">load from</label>
+          <div style={{ display: "flex", gap: 4 }}>
+            {([["from_job", "Run"], ["base_model", "Base Model"], ["manual", "Manual"]] as [SourceMode, string][]).map(
+              ([m, label]) => (
+                <button key={m} className={`lf-chip ${sourceMode === m ? "lf-chip-active" : ""}`}
+                  style={{ flex: 1, justifyContent: "center", fontSize: 10 }}
+                  onClick={() => setSourceMode(m)}>{label}</button>
+              )
+            )}
+          </div>
         </div>
 
-        <div style={{ marginBottom: 8 }}>
-          <Field label="adapter path (optional)">
-            <input className="lf-input" value={form.adapter_path} onChange={(e) => set("adapter_path", e.target.value)} placeholder="./outputs/run1/final_adapter" />
-          </Field>
-        </div>
+        {/* FROM JOB */}
+        {sourceMode === "from_job" && (
+          <div style={{ marginBottom: 8 }}>
+            <Field label="completed run">
+              <select className="lf-input lf-select" value={selectedJobId}
+                onChange={(e) => setSelectedJobId(e.target.value)}>
+                <option value="">— select a completed run —</option>
+                {completedJobs.map((j) => (
+                  <option key={j.id} value={j.id}>
+                    #{j.id} {j.name} [{j.training_method}/{j.peft_method}]
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {selectedJob && (
+              <div style={{ marginTop: 6, padding: "6px 8px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 3, display: "flex", flexDirection: "column", gap: 3 }}>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 10 }}>
+                  <span style={{ color: "var(--text-dim)", minWidth: 52, display: "inline-block" }}>model</span>
+                  <span style={{ color: "var(--text-hi)", wordBreak: "break-all" }}>{form.model_path || "—"}</span>
+                </div>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 10 }}>
+                  <span style={{ color: "var(--text-dim)", minWidth: 52, display: "inline-block" }}>adapter</span>
+                  {form.adapter_path
+                    ? <span style={{ color: "var(--green)", wordBreak: "break-all" }}>{form.adapter_path}</span>
+                    : <span style={{ color: "var(--amber, #f59e0b)" }}>none — full model eval</span>}
+                </div>
+              </div>
+            )}
+            {completedJobs.length === 0 && (
+              <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", marginTop: 4 }}>
+                No completed runs yet. Train a model first.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* BASE MODEL ONLY */}
+        {sourceMode === "base_model" && (
+          <div style={{ marginBottom: 8 }}>
+            <label className="lf-label">model</label>
+            <select className="lf-input lf-select" value={form.model_path}
+              onChange={(e) => set("model_path", e.target.value)} style={{ marginBottom: 4 }}>
+              <option value="">— select registered model —</option>
+              {models.map((m) => <option key={m.id} value={m.local_path || m.hf_repo}>{m.name}</option>)}
+            </select>
+            <input className="lf-input" value={form.model_path}
+              onChange={(e) => set("model_path", e.target.value)} placeholder="or enter path / HF repo" />
+            <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", marginTop: 4 }}>
+              Base model only — no adapter applied
+            </div>
+          </div>
+        )}
+
+        {/* MANUAL */}
+        {sourceMode === "manual" && (
+          <>
+            <div style={{ marginBottom: 8 }}>
+              <label className="lf-label">model path</label>
+              <select className="lf-input lf-select" value={form.model_path}
+                onChange={(e) => set("model_path", e.target.value)} style={{ marginBottom: 4 }}>
+                <option value="">— select registered model —</option>
+                {models.map((m) => <option key={m.id} value={m.local_path || m.hf_repo}>{m.name}</option>)}
+              </select>
+              <input className="lf-input" value={form.model_path}
+                onChange={(e) => set("model_path", e.target.value)} placeholder="or enter path / HF repo" />
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <Field label="adapter path (optional)">
+                <input className="lf-input" value={form.adapter_path}
+                  onChange={(e) => set("adapter_path", e.target.value)} placeholder="./outputs/run1/final_adapter" />
+              </Field>
+            </div>
+          </>
+        )}
 
         <div className="lf-row lf-row-2" style={{ marginBottom: 8 }}>
           <Field label="quantization">
@@ -145,11 +270,15 @@ export default function EvaluatePage() {
         <Section title="Dataset" />
         <div style={{ marginBottom: 8 }}>
           <label className="lf-label">dataset</label>
-          <select className="lf-input lf-select" value={form.dataset_id} onChange={(e) => set("dataset_id", e.target.value)} style={{ marginBottom: 4 }}>
+          <select className="lf-input lf-select" value={form.dataset_id}
+            onChange={(e) => set("dataset_id", e.target.value)} style={{ marginBottom: 4 }}>
             <option value="">— select from registry —</option>
-            {datasets.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.num_samples?.toLocaleString() ?? "?"})</option>)}
+            {datasets.map((d) => (
+              <option key={d.id} value={d.id}>{d.name} ({d.num_samples?.toLocaleString() ?? "?"})</option>
+            ))}
           </select>
-          <input className="lf-input" value={form.dataset_path} onChange={(e) => set("dataset_path", e.target.value)} placeholder="or enter file path" />
+          <input className="lf-input" value={form.dataset_path}
+            onChange={(e) => set("dataset_path", e.target.value)} placeholder="or enter file path" />
         </div>
 
         <div className="lf-row lf-row-2" style={{ marginBottom: 8 }}>
@@ -161,7 +290,7 @@ export default function EvaluatePage() {
           </Field>
         </div>
 
-        {mode === "predict" && (
+        {evalMode === "predict" && (
           <>
             <Section title="Predict Output" />
             <div style={{ marginBottom: 8 }}>
@@ -174,14 +303,15 @@ export default function EvaluatePage() {
 
         <div style={{ display: "flex", gap: 8, paddingTop: 12, borderTop: "1px solid var(--border)", marginTop: 4 }}>
           <button className="lf-btn lf-btn-primary" style={{ flex: 1 }}
-            disabled={running || !form.model_path || (!form.dataset_id && !form.dataset_path)}
-            onClick={handleStart}>
-            {running ? <><span className="lf-spin" /> {mode === "evaluate" ? "Evaluating…" : "Predicting…"}</> : `▶ Start ${mode === "evaluate" ? "Evaluate" : "Predict"}`}
+            disabled={running || !canStart} onClick={handleStart}>
+            {running
+              ? <><span className="lf-spin" /> {evalMode === "evaluate" ? "Evaluating…" : "Predicting…"}</>
+              : `▶ Start ${evalMode === "evaluate" ? "Evaluate" : "Predict"}`}
           </button>
         </div>
       </div>
 
-      {/* RIGHT */}
+      {/* ── RIGHT ── */}
       <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {/* Status bar */}
         <div style={{ borderBottom: "1px solid var(--border)", padding: "0 14px", height: 32, display: "flex", alignItems: "center", gap: 14, background: "var(--bg-panel)", flexShrink: 0 }}>

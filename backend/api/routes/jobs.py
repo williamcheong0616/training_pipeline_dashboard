@@ -33,6 +33,7 @@ class JobResponse(BaseModel):
     peft_method: str
     model_id: Optional[int]
     dataset_id: Optional[int]
+    config_json: Optional[dict] = None
     output_dir: Optional[str]
     error_msg: Optional[str]
     created_at: datetime

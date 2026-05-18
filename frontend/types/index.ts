@@ -8,6 +8,7 @@ export interface Job {
   peft_method: string;
   model_id: number | null;
   dataset_id: number | null;
+  config_json: Record<string, unknown> | null;
   output_dir: string | null;
   error_msg: string | null;
   created_at: string;
