@@ -56,6 +56,8 @@ export interface Dataset {
   num_samples: number | null;
   description: string | null;
   created_at: string;
+  detected_format?: string | null;
+  detection_confidence?: string | null;
 }
 
 export interface SystemStats {

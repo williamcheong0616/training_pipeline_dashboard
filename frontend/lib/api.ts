@@ -38,7 +38,9 @@ export const uploadDataset = (form: FormData) =>
   http.post<Dataset>("/datasets", form, { headers: { "Content-Type": "multipart/form-data" } }).then((r) => r.data);
 export const deleteDataset = (id: number) => http.delete(`/datasets/${id}`);
 export const previewDataset = (id: number) =>
-  http.get<{ format: string; total: number | null; samples: Record<string, unknown>[] }>(`/datasets/${id}/preview`).then((r) => r.data);
+  http.get<{ format: string; total: number | null; samples: Record<string, unknown>[]; valid_targets: string[]; conversion_notes: Record<string, string> }>(`/datasets/${id}/preview`).then((r) => r.data);
+export const convertDataset = (id: number, body: { target_format: string; template_name?: string; output_name?: string }) =>
+  http.post<Dataset>(`/datasets/${id}/convert`, body).then((r) => r.data);
 export const previewASRDataset = (id: number) =>
   http.get<{ total: number | null; columns: string[]; samples: Record<string, string>[] }>(`/asr/datasets/${id}/preview`).then((r) => r.data);
 

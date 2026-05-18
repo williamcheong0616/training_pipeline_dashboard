@@ -1,20 +1,10 @@
 "use client";
 import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getDatasets, uploadDataset, deleteDataset, previewDataset } from "@/lib/api";
+import { getDatasets, uploadDataset, deleteDataset, previewDataset, convertDataset } from "@/lib/api";
 import type { Dataset } from "@/types";
 
-// ── format auto-detection ────────────────────────────────────────────────────
-
-function detectFormat(records: Record<string, unknown>[]): string {
-  if (!records.length) return "plain_text";
-  const first = records[0];
-  if ("conversations" in first || "messages" in first) return "sharegpt";
-  if ("prompt" in first && "chosen" in first && "rejected" in first) return "dpo";
-  if ("prompt" in first && "completion" in first && "label" in first) return "kto";
-  if ("instruction" in first || "output" in first) return "alpaca";
-  return "plain_text";
-}
+// ── helpers ───────────────────────────────────────────────────────────────────
 
 function formatLabel(fmt: string) {
   const colors: Record<string, string> = {
@@ -28,7 +18,11 @@ function formatLabel(fmt: string) {
   );
 }
 
-// ── sample card renderer ──────────────────────────────────────────────────────
+function confidenceColor(c: string) {
+  return c === "high" ? "var(--green)" : c === "medium" ? "var(--amber)" : "var(--text-dim)";
+}
+
+// ── sample card ───────────────────────────────────────────────────────────────
 
 function SampleCard({ record, index }: { record: Record<string, unknown>; index: number }) {
   const KEY_ORDER = ["instruction", "input", "output", "prompt", "chosen", "rejected",
@@ -64,9 +58,121 @@ function SampleCard({ record, index }: { record: Record<string, unknown>; index:
   );
 }
 
+// ── convert panel ─────────────────────────────────────────────────────────────
+
+const TEMPLATES = ["alpaca", "chatml", "llama3", "mistral", "qwen", "phi3", "gemma"];
+
+function ConvertPanel({ dataset, validTargets, conversionNotes, onDone }: {
+  dataset: Dataset;
+  validTargets: string[];
+  conversionNotes: Record<string, string>;
+  onDone: () => void;
+}) {
+  const qc = useQueryClient();
+  const [targetFmt, setTargetFmt] = useState(validTargets[0] ?? "");
+  const [templateName, setTemplateName] = useState("alpaca");
+  const [outputName, setOutputName] = useState(`${dataset.name}_as_${targetFmt}`);
+  const [status, setStatus] = useState<"idle" | "converting" | "done" | "error">("idle");
+  const [resultName, setResultName] = useState("");
+  const [errMsg, setErrMsg] = useState("");
+
+  const handleTargetChange = (t: string) => {
+    setTargetFmt(t);
+    setOutputName(`${dataset.name}_as_${t}`);
+    setStatus("idle");
+  };
+
+  const handleConvert = async () => {
+    setStatus("converting");
+    setErrMsg("");
+    try {
+      const result = await convertDataset(dataset.id, {
+        target_format: targetFmt,
+        template_name: templateName,
+        output_name: outputName,
+      });
+      setResultName(result.name);
+      setStatus("done");
+      qc.invalidateQueries({ queryKey: ["datasets"] });
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Conversion failed.";
+      setErrMsg(msg);
+      setStatus("error");
+    }
+  };
+
+  if (!validTargets.length) {
+    return (
+      <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-dim)", padding: "16px 0" }}>
+        No conversions available for <strong style={{ color: "var(--text)" }}>{dataset.format}</strong> format.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div>
+        <label className="lf-label">target format</label>
+        <div className="lf-checkbox-group">
+          {validTargets.map((t) => (
+            <button key={t} className={`lf-chip ${targetFmt === t ? "lf-chip-active" : ""}`}
+              onClick={() => handleTargetChange(t)}>{t}</button>
+          ))}
+        </div>
+      </div>
+
+      {targetFmt === "plain_text" && (
+        <div>
+          <label className="lf-label">bake-in template</label>
+          <select className="lf-input lf-select" value={templateName} onChange={(e) => setTemplateName(e.target.value)}>
+            {TEMPLATES.map((t) => <option key={t}>{t}</option>)}
+          </select>
+          <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", marginTop: 3 }}>
+            Applies the chat template at conversion time — the text field will contain the full formatted prompt.
+          </div>
+        </div>
+      )}
+
+      {conversionNotes[targetFmt] && (
+        <div style={{
+          fontFamily: "var(--mono)", fontSize: 10, color: "var(--accent)",
+          background: "var(--accent-dim)", borderRadius: 3, padding: "5px 8px",
+        }}>
+          {conversionNotes[targetFmt]}
+        </div>
+      )}
+
+      <div>
+        <label className="lf-label">output dataset name</label>
+        <input className="lf-input" value={outputName} onChange={(e) => { setOutputName(e.target.value); setStatus("idle"); }} />
+      </div>
+
+      {status === "done" && (
+        <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--green)", background: "var(--green-dim)", borderRadius: 3, padding: "5px 8px" }}>
+          Saved as <strong>{resultName}</strong> — visible in the dataset list.
+          <button className="lf-btn lf-btn-ghost" style={{ marginLeft: 10, height: 20, fontSize: 10, padding: "0 6px" }} onClick={onDone}>view</button>
+        </div>
+      )}
+      {status === "error" && (
+        <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--red)", background: "var(--red-dim)", borderRadius: 3, padding: "5px 8px" }}>{errMsg}</div>
+      )}
+
+      <button
+        className="lf-btn lf-btn-primary"
+        style={{ width: "100%" }}
+        disabled={status === "converting" || !targetFmt || !outputName}
+        onClick={handleConvert}
+      >
+        {status === "converting" ? <><span className="lf-spin" /> Converting…</> : "⇄ Convert & Save as New Dataset"}
+      </button>
+    </div>
+  );
+}
+
 // ── preview panel ─────────────────────────────────────────────────────────────
 
 function PreviewPanel({ dataset, onClose }: { dataset: Dataset; onClose: () => void }) {
+  const [tab, setTab] = useState<"samples" | "convert">("samples");
   const { data, isLoading, isError } = useQuery({
     queryKey: ["dataset-preview", dataset.id],
     queryFn: () => previewDataset(dataset.id),
@@ -75,6 +181,7 @@ function PreviewPanel({ dataset, onClose }: { dataset: Dataset; onClose: () => v
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {/* header */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <span style={{ fontFamily: "var(--mono)", fontSize: 11, fontWeight: 600, color: "var(--text-hi)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {dataset.name}
@@ -83,18 +190,42 @@ function PreviewPanel({ dataset, onClose }: { dataset: Dataset; onClose: () => v
       </div>
 
       {data && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
           {formatLabel(data.format)}
           <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>
-            {data.total?.toLocaleString() ?? "?"} samples total · showing {data.samples.length}
+            {data.total?.toLocaleString() ?? "?"} samples
           </span>
         </div>
       )}
 
+      {/* tab toggle */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
+        {(["samples", "convert"] as const).map((t) => (
+          <button key={t} className={`lf-chip ${tab === t ? "lf-chip-active" : ""}`}
+            style={{ flex: 1, justifyContent: "center" }}
+            onClick={() => setTab(t)}>
+            {t === "samples" ? `samples (${data?.samples.length ?? 0})` : "⇄ convert"}
+          </button>
+        ))}
+      </div>
+
       <div style={{ flex: 1, overflowY: "auto" }}>
-        {isLoading && <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-dim)", padding: 12 }}>loading preview…</div>}
-        {isError && <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--red)", padding: 12 }}>Failed to load preview — file may have moved.</div>}
-        {data?.samples.map((rec, i) => <SampleCard key={i} record={rec} index={i} />)}
+        {tab === "samples" ? (
+          <>
+            {isLoading && <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-dim)", padding: 12 }}>loading preview…</div>}
+            {isError && <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--red)", padding: 12 }}>Failed to load preview.</div>}
+            {data?.samples.map((rec, i) => <SampleCard key={i} record={rec} index={i} />)}
+          </>
+        ) : (
+          data
+            ? <ConvertPanel
+                dataset={dataset}
+                validTargets={data.valid_targets}
+                conversionNotes={data.conversion_notes}
+                onDone={() => setTab("samples")}
+              />
+            : <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-dim)" }}>Loading…</div>
+        )}
       </div>
     </div>
   );
@@ -102,39 +233,23 @@ function PreviewPanel({ dataset, onClose }: { dataset: Dataset; onClose: () => v
 
 // ── upload panel ──────────────────────────────────────────────────────────────
 
-const FORMATS = ["alpaca", "sharegpt", "plain_text", "dpo", "kto"];
+const FORMATS = ["auto", "alpaca", "sharegpt", "plain_text", "dpo", "kto"];
 
 function UploadPanel({ onUploaded }: { onUploaded: () => void }) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [form, setForm] = useState({ name: "", format: "alpaca", description: "" });
-  const [detected, setDetected] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: "", format: "auto", description: "" });
+  const [lastDetection, setLastDetection] = useState<{ format: string; confidence: string } | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  const handleFileChange = async () => {
+  const handleFileChange = () => {
     const file = fileRef.current?.files?.[0];
     if (!file) return;
-    // Auto-fill name if empty
     if (!form.name) {
       setForm((p) => ({ ...p, name: file.name.replace(/\.(json|jsonl)$/i, "") }));
     }
-    // Detect format
-    try {
-      const text = await file.text();
-      let records: Record<string, unknown>[] = [];
-      if (file.name.endsWith(".jsonl")) {
-        const lines = text.split("\n").filter((l) => l.trim());
-        records = lines.slice(0, 3).map((l) => JSON.parse(l));
-      } else {
-        const parsed = JSON.parse(text);
-        records = Array.isArray(parsed) ? parsed.slice(0, 3) : [parsed];
-      }
-      const fmt = detectFormat(records);
-      setDetected(fmt);
-      setForm((p) => ({ ...p, format: fmt }));
-    } catch {
-      setDetected(null);
-    }
+    // Clear previous detection hint when a new file is chosen
+    setLastDetection(null);
   };
 
   const handleUpload = async () => {
@@ -147,10 +262,12 @@ function UploadPanel({ onUploaded }: { onUploaded: () => void }) {
     fd.append("description", form.description);
     setUploading(true);
     try {
-      await uploadDataset(fd);
+      const result = await uploadDataset(fd);
       qc.invalidateQueries({ queryKey: ["datasets"] });
-      setForm({ name: "", format: "alpaca", description: "" });
-      setDetected(null);
+      if (result.detected_format) {
+        setLastDetection({ format: result.detected_format, confidence: result.detection_confidence ?? "low" });
+      }
+      setForm({ name: "", format: "auto", description: "" });
       if (fileRef.current) fileRef.current.value = "";
       onUploaded();
     } finally {
@@ -167,14 +284,18 @@ function UploadPanel({ onUploaded }: { onUploaded: () => void }) {
       <div>
         <label className="lf-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
           format
-          {detected && (
-            <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--green)", background: "var(--green-dim)", padding: "1px 5px", borderRadius: 2 }}>
-              auto-detected
+          {lastDetection && (
+            <span style={{
+              fontFamily: "var(--mono)", fontSize: 9,
+              color: confidenceColor(lastDetection.confidence),
+              background: "var(--bg-input)", padding: "1px 5px", borderRadius: 2, border: "1px solid var(--border)",
+            }}>
+              detected: {lastDetection.format} · {lastDetection.confidence} confidence
             </span>
           )}
         </label>
-        <select className="lf-input lf-select" value={form.format} onChange={(e) => { setForm((p) => ({ ...p, format: e.target.value })); setDetected(null); }}>
-          {FORMATS.map((f) => <option key={f}>{f}</option>)}
+        <select className="lf-input lf-select" value={form.format} onChange={(e) => setForm((p) => ({ ...p, format: e.target.value }))}>
+          {FORMATS.map((f) => <option key={f} value={f}>{f === "auto" ? "auto-detect (recommended)" : f}</option>)}
         </select>
       </div>
       <div>
@@ -242,7 +363,7 @@ export default function DatasetsPage() {
         <div style={{ fontFamily: "var(--mono)", fontSize: 11, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
           Datasets ({datasets.length})
           <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", fontWeight: 400, marginLeft: 10, textTransform: "none" }}>
-            click a row to preview
+            click a row to preview · select Convert tab to reformat
           </span>
         </div>
         <div className="lf-panel" style={{ flex: 1, overflow: "auto" }}>
