@@ -37,6 +37,10 @@ export const getDatasets = () => http.get<Dataset[]>("/datasets").then((r) => r.
 export const uploadDataset = (form: FormData) =>
   http.post<Dataset>("/datasets", form, { headers: { "Content-Type": "multipart/form-data" } }).then((r) => r.data);
 export const deleteDataset = (id: number) => http.delete(`/datasets/${id}`);
+export const previewDataset = (id: number) =>
+  http.get<{ format: string; total: number | null; samples: Record<string, unknown>[] }>(`/datasets/${id}/preview`).then((r) => r.data);
+export const previewASRDataset = (id: number) =>
+  http.get<{ total: number | null; columns: string[]; samples: Record<string, string>[] }>(`/asr/datasets/${id}/preview`).then((r) => r.data);
 
 // Exports
 export const exportJob = (jobId: number, output_name?: string) =>

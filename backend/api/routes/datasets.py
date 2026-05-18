@@ -79,6 +79,32 @@ async def upload_dataset(
     return entry
 
 
+@router.get("/{dataset_id}/preview")
+def preview_dataset(dataset_id: int, db: Session = Depends(get_db)):
+    entry = db.get(Dataset, dataset_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    if not os.path.exists(entry.path):
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    try:
+        with open(entry.path, encoding="utf-8") as f:
+            content = f.read()
+        if entry.path.endswith(".jsonl"):
+            records = []
+            for line in content.splitlines():
+                line = line.strip()
+                if line:
+                    records.append(json.loads(line))
+                if len(records) >= 5:
+                    break
+        else:
+            data = json.loads(content)
+            records = (data[:5] if isinstance(data, list) else [data])
+        return {"format": entry.format, "total": entry.num_samples, "samples": records}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.delete("/{dataset_id}", status_code=204)
 def delete_dataset(dataset_id: int, db: Session = Depends(get_db)):
     entry = db.get(Dataset, dataset_id)

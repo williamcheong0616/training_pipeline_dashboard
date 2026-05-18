@@ -210,6 +210,24 @@ async def upload_asr_zip(
     return entry
 
 
+@router.get("/datasets/{dataset_id}/preview")
+def preview_asr_dataset(dataset_id: int, db: Session = Depends(get_db)):
+    import csv as csv_mod
+    entry = db.get(Dataset, dataset_id)
+    if not entry or entry.format != "asr_csv":
+        raise HTTPException(status_code=404, detail="ASR dataset not found")
+    if not os.path.exists(entry.path):
+        raise HTTPException(status_code=404, detail="CSV file not found on disk")
+    try:
+        with open(entry.path, newline="", encoding="utf-8-sig") as f:
+            reader = csv_mod.DictReader(f)
+            rows = [dict(r) for r in reader][:5]
+        columns = list(rows[0].keys()) if rows else []
+        return {"total": entry.num_samples, "columns": columns, "samples": rows}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.delete("/datasets/{dataset_id}", status_code=204)
 def delete_asr_dataset(dataset_id: int, db: Session = Depends(get_db)):
     entry = db.get(Dataset, dataset_id)
