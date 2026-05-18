@@ -32,7 +32,7 @@ class DatasetResponse(BaseModel):
 
 @router.get("", response_model=List[DatasetResponse])
 def list_datasets(db: Session = Depends(get_db)):
-    return db.query(Dataset).order_by(Dataset.created_at.desc()).all()
+    return db.query(Dataset).filter(Dataset.format != "asr_csv").order_by(Dataset.created_at.desc()).all()
 
 
 @router.post("", response_model=DatasetResponse, status_code=201)

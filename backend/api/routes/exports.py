@@ -1,5 +1,7 @@
 from __future__ import annotations
 import os
+from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
@@ -18,6 +20,26 @@ class ExportRequest(BaseModel):
     output_name: str = ""
 
 
+class PathExportRequest(BaseModel):
+    adapter_path: str
+    output_name: str = ""
+
+
+@router.get("")
+def list_exports():
+    entries = []
+    for p in sorted(Path(EXPORTS_DIR).iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+        if p.is_dir():
+            size_mb = sum(f.stat().st_size for f in p.rglob("*") if f.is_file()) / (1024 ** 2)
+            entries.append({
+                "name": p.name,
+                "path": str(p),
+                "size_mb": round(size_mb, 1),
+                "created_at": datetime.fromtimestamp(p.stat().st_mtime).isoformat(),
+            })
+    return entries
+
+
 def _merge_adapter(adapter_path: str, save_path: str):
     from transformers import AutoModelForCausalLM, AutoTokenizer
     from peft import PeftModel
@@ -33,6 +55,16 @@ def _merge_adapter(adapter_path: str, save_path: str):
     merged.save_pretrained(save_path)
     tokenizer = AutoTokenizer.from_pretrained(adapter_path)
     tokenizer.save_pretrained(save_path)
+
+
+@router.post("/from-path")
+def export_from_path(body: PathExportRequest, background_tasks: BackgroundTasks):
+    if not os.path.isdir(body.adapter_path):
+        raise HTTPException(status_code=400, detail="Adapter path does not exist")
+    name = body.output_name or f"merged_custom_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    save_path = os.path.join(EXPORTS_DIR, name)
+    background_tasks.add_task(_merge_adapter, body.adapter_path, save_path)
+    return {"message": "Merge started", "save_path": save_path}
 
 
 @router.post("/{job_id}")
