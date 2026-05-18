@@ -12,6 +12,19 @@ const TRAINING_METHODS = ["sft", "lora", "qlora"] as const;
 const QUANT_OPTIONS    = ["none", "4bit", "8bit"] as const;
 const TASKS            = ["transcribe", "translate"] as const;
 const TARGET_MODS      = ["q_proj", "k_proj", "v_proj", "o_proj"] as const;
+
+const TRAINING_METHOD_TIPS: Record<string, string> = {
+  sft:   "Full fine-tuning — all Whisper encoder and decoder weights are updated. Most expressive but requires the most VRAM (40GB+ for large-v3). Best for large domain shifts or low-resource languages.",
+  lora:  "Low-Rank Adaptation — attaches small trainable matrices to attention layers while the base Whisper weights stay frozen. Trains in ~8GB VRAM; fast and effective for accent or domain adaptation.",
+  qlora: "Quantized LoRA — runs the frozen Whisper base in 4-bit NormalFloat while LoRA adapters stay in bfloat16. Enables large-v3 on 12–16GB; automatically sets quantization to 4-bit.",
+};
+
+const MOD_TIPS: Record<string, string> = {
+  q_proj: "Query projection in cross-attention — shapes how each decoder token queries the audio encoder outputs. Most influential for alignment between transcript and audio; always include for domain adaptation.",
+  k_proj: "Key projection in cross-attention — controls how encoder frames are exposed to decoder queries. Tuning improves acoustic feature selection; add when adapting to accented speech or noisy audio.",
+  v_proj: "Value projection in cross-attention — determines the audio content retrieved per decode step. Together with q_proj, the minimal effective LoRA pair for ASR fine-tuning.",
+  o_proj: "Output projection — merges cross-attention heads back into the decoder residual stream. Adding LoRA here improves how audio features integrate into decoding; useful for low-resource languages.",
+};
 const LANG_PRESETS     = [
   { label: "Auto-detect", value: "auto" },
   { label: "Malay",       value: "malay" },
@@ -322,12 +335,15 @@ export default function ASRPage() {
           </label>
           <div className="lf-checkbox-group">
             {TRAINING_METHODS.map((m) => (
-              <button key={m} className={`lf-chip ${form.training_method === m ? "lf-chip-active" : ""}`}
-                onClick={() => {
-                  set("training_method", m);
-                  if (m === "qlora") set("quantization", "4bit");
-                  if (m === "sft") set("quantization", "none");
-                }}>{m === "sft" ? "SFT (full)" : m}</button>
+              <span key={m} className="lf-tt-wrap" style={{ marginLeft: 0 }}>
+                <button className={`lf-chip ${form.training_method === m ? "lf-chip-active" : ""}`}
+                  onClick={() => {
+                    set("training_method", m);
+                    if (m === "qlora") set("quantization", "4bit");
+                    if (m === "sft") set("quantization", "none");
+                  }}>{m === "sft" ? "SFT (full)" : m}</button>
+                <span className="lf-tt-box">{TRAINING_METHOD_TIPS[m]}</span>
+              </span>
             ))}
           </div>
           {form.training_method === "sft" && (
@@ -356,8 +372,11 @@ export default function ASRPage() {
               </label>
               <div className="lf-checkbox-group">
                 {TARGET_MODS.map((mod) => (
-                  <button key={mod} className={`lf-chip ${form.target_modules.includes(mod) ? "lf-chip-active" : ""}`}
-                    onClick={() => toggleModule(mod)}>{mod}</button>
+                  <span key={mod} className="lf-tt-wrap" style={{ marginLeft: 0 }}>
+                    <button className={`lf-chip ${form.target_modules.includes(mod) ? "lf-chip-active" : ""}`}
+                      onClick={() => toggleModule(mod)}>{mod}</button>
+                    <span className="lf-tt-box">{MOD_TIPS[mod]}</span>
+                  </span>
                 ))}
               </div>
             </div>

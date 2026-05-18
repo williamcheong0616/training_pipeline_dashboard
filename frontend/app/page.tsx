@@ -10,9 +10,36 @@ import type { Job } from "@/types";
 
 const METHODS    = ["sft","unsupervised","dpo","rm","kto","orpo"] as const;
 const PEFT       = ["lora","qlora","dora","full"] as const;
+
+const METHOD_TIPS: Record<string, string> = {
+  sft:          "Supervised Fine-Tuning — trains on instruction/response pairs. The standard starting point for instruction-following and domain adaptation.",
+  unsupervised: "Causal language modelling on raw text with no labels. Useful for continued pre-training on domain-specific corpora before supervised fine-tuning.",
+  dpo:          "Direct Preference Optimization — learns from chosen vs. rejected response pairs without a separate reward model. More stable than PPO-RLHF.",
+  rm:           "Reward Model training — supervised regression on preference pairs to produce a scalar reward signal, typically used before PPO-based RLHF.",
+  kto:          "Kahneman-Tversky Optimization — preference alignment using only per-sample binary good/bad labels; no paired comparisons needed.",
+  orpo:         "Odds Ratio Preference Optimization — combines SFT and preference loss in a single pass, eliminating the need for a separate reference model.",
+};
+
+const PEFT_TIPS: Record<string, string> = {
+  lora:  "Low-Rank Adaptation — inserts small trainable rank-decomposition matrices into attention layers. Fast to train, low VRAM overhead, recommended for most tasks.",
+  qlora: "Quantized LoRA — runs the frozen base model in 4-bit NormalFloat while LoRA adapters stay in bfloat16. Cuts VRAM by ~60% vs full LoRA; enables 70B on 24GB.",
+  dora:  "Weight-Decomposed LoRA — separates magnitude and direction updates for marginally better accuracy than standard LoRA at the same rank. Slightly slower.",
+  full:  "Full fine-tuning — all model weights are updated. Highest expressiveness but requires VRAM equal to the model size × optimizer states (typically 16–24× parameter count in GB).",
+};
 const QUANT      = ["none","4bit","8bit"] as const;
 const SCHEDULERS = ["cosine","linear","constant","cosine_with_restarts","polynomial"] as const;
 const TARGET_MODS = ["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj","lm_head"] as const;
+
+const MOD_TIPS: Record<string, string> = {
+  q_proj:    "Query projection — maps each token's hidden state to attention query vectors. Controls what the token 'looks for' in other positions. Highly impactful; almost always included.",
+  k_proj:    "Key projection — maps hidden states to key vectors that queries match against. Defines what information each token 'exposes'. Tuning alongside q_proj improves attention selectivity.",
+  v_proj:    "Value projection — maps hidden states to the content actually retrieved when attention weights are applied. Together with q_proj, the minimal effective LoRA pair for most tasks.",
+  o_proj:    "Output projection — merges multi-head attention outputs back into the residual stream. Adding LoRA here improves how attention updates are integrated; modest VRAM cost.",
+  gate_proj: "Gate projection in SwiGLU FFN — multiplicative gate controlling information flow through the feed-forward block. Essential for Llama/Mistral-family models; ignored by GPT-style FFNs.",
+  up_proj:   "Up-projection in FFN — expands hidden dim before the activation. Highest parameter count of the FFN projections; adding LoRA here significantly increases adapter expressiveness at the cost of VRAM.",
+  down_proj: "Down-projection in FFN — compresses the expanded FFN representation back to hidden dim. Pair with up_proj for full FFN LoRA coverage.",
+  lm_head:   "Language model head — final linear layer mapping hidden states to vocabulary logits. LoRA here directly shapes output token distribution; rarely needed but useful for format or style tuning.",
+};
 
 function Field({ label, tooltip, children }: { label: string; tooltip?: string; children: React.ReactNode }) {
   return (
@@ -257,8 +284,11 @@ export default function TrainPage() {
           </label>
           <div className="lf-checkbox-group">
             {METHODS.map((m) => (
-              <button key={m} className={`lf-chip ${form.training_method === m ? "lf-chip-active" : ""}`}
-                onClick={() => set("training_method", m)}>{m}</button>
+              <span key={m} className="lf-tt-wrap" style={{ marginLeft: 0 }}>
+                <button className={`lf-chip ${form.training_method === m ? "lf-chip-active" : ""}`}
+                  onClick={() => set("training_method", m)}>{m}</button>
+                <span className="lf-tt-box">{METHOD_TIPS[m]}</span>
+              </span>
             ))}
           </div>
         </div>
@@ -269,8 +299,11 @@ export default function TrainPage() {
           </label>
           <div className="lf-checkbox-group">
             {PEFT.map((p) => (
-              <button key={p} className={`lf-chip ${form.peft_method === p ? "lf-chip-active" : ""}`}
-                onClick={() => set("peft_method", p)}>{p}</button>
+              <span key={p} className="lf-tt-wrap" style={{ marginLeft: 0 }}>
+                <button className={`lf-chip ${form.peft_method === p ? "lf-chip-active" : ""}`}
+                  onClick={() => set("peft_method", p)}>{p}</button>
+                <span className="lf-tt-box">{PEFT_TIPS[p]}</span>
+              </span>
             ))}
           </div>
         </div>
@@ -294,8 +327,11 @@ export default function TrainPage() {
               </label>
               <div className="lf-checkbox-group">
                 {TARGET_MODS.map((mod) => (
-                  <button key={mod} className={`lf-chip ${form.target_modules.includes(mod) ? "lf-chip-active" : ""}`}
-                    onClick={() => toggleModule(mod)}>{mod}</button>
+                  <span key={mod} className="lf-tt-wrap" style={{ marginLeft: 0 }}>
+                    <button className={`lf-chip ${form.target_modules.includes(mod) ? "lf-chip-active" : ""}`}
+                      onClick={() => toggleModule(mod)}>{mod}</button>
+                    <span className="lf-tt-box">{MOD_TIPS[mod]}</span>
+                  </span>
                 ))}
               </div>
             </div>
