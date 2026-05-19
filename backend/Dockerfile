@@ -13,9 +13,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CUDA_HOME=/usr/local/cuda
 
 # Install Python 3.12 (ships natively in Ubuntu 24.04 — no PPA needed).
-# Clean cached apt lists from the base image first to avoid stale-hash failures.
+# "|| true" tolerates transient Ubuntu CDN hash-mismatch errors on multiverse/universe;
+# python3.12 lives in main which always fetches cleanly.
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* \
-    && apt-get update && apt-get install -y --no-install-recommends \
+    && (apt-get update || true) \
+    && apt-get install -y --no-install-recommends \
         python3.12 python3.12-dev python3-pip \
     && update-alternatives --install /usr/bin/python  python  /usr/bin/python3.12 1 \
     && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 \
