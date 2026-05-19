@@ -26,6 +26,9 @@ frontend/tsconfig.tsbuildinfo
 
 # ── ML artifacts (large binaries — never commit) ──────────────────────────────
 models/
+# Allow Next.js route folders named "models" inside the frontend
+!frontend/app/**/models/
+!frontend/app/**/models/**
 outputs/
 exports/
 checkpoints/
