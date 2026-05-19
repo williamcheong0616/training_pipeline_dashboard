@@ -52,6 +52,11 @@ data/
 *.sqlite
 *.sqlite3
 
+# ── Runtime data (bind-mount dirs — never commit) ─────────────────────────────
+data/
+outputs/
+backups/
+
 # ── Logs & caches ─────────────────────────────────────────────────────────────
 logs/
 *.log
@@ -68,4 +73,3 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
-data/

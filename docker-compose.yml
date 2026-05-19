@@ -1,117 +1,161 @@
+name: forge
+
+# All data lives in bind-mounted host directories so every file is directly
+# traceable on the workstation (ls, tail, cp — no docker volume commands needed).
+# Directory layout created by `make setup`:
+#   ./data/db      — SQLite database
+#   ./data/redis   — Redis AOF persistence
+#   ./models       — HuggingFace model weights
+#   ./datasets     — uploaded datasets
+#   ./outputs      — training checkpoints and adapter weights
+#   ./exports      — merged / quantised exports
+#   ./logs         — stdout/stderr captured by Docker's json-file driver
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
+x-data-volumes: &data-volumes
+  - ./models:/app/models
+  - ./datasets:/app/datasets
+  - ./outputs:/app/outputs
+  - ./exports:/app/exports
+  - ./data/db:/app/data
+
 services:
+  # ── Redis (broker + result backend) ─────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - ./data/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+    logging: *default-logging
 
+  # ── FastAPI (uvicorn) ────────────────────────────────────────────────────────
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: uvicorn backend.api.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    command: >
+      uvicorn backend.api.main:app
+      --host 0.0.0.0 --port 8000
+      --workers 1 --log-level info --access-log
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     env_file: .env
     environment:
       - REDIS_URL=redis://redis:6379/0
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
-    volumes:
-      - ./backend:/app/backend
-      - ./models:/app/models
-      - ./datasets:/app/datasets
-      - ./outputs:/app/outputs
-      - ./exports:/app/exports
-      - forge_db:/app/data
+      - PYTHONUNBUFFERED=1
+    volumes: *data-volumes
     depends_on:
       redis:
         condition: service_healthy
-    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 15s
+    logging: *default-logging
 
+  # ── Celery worker (GPU) ───────────────────────────────────────────────────────
   worker:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: celery -A backend.workers.celery_app worker --loglevel=info --concurrency=1
+    restart: unless-stopped
+    command: >
+      celery -A backend.workers.celery_app worker
+      --loglevel=info --concurrency=1
+      --logfile=/dev/stdout
     env_file: .env
     environment:
       - REDIS_URL=redis://redis:6379/0
-    volumes:
-      - ./backend:/app/backend
-      - ./models:/app/models
-      - ./datasets:/app/datasets
-      - ./outputs:/app/outputs
-      - ./exports:/app/exports
-      - forge_db:/app/data
+      - PYTHONUNBUFFERED=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes: *data-volumes
     depends_on:
       redis:
         condition: service_healthy
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    restart: unless-stopped
+    runtime: nvidia        # requires NVIDIA Container Toolkit on the workstation
     healthcheck:
-      test: ["CMD", "celery", "-A", "backend.workers.celery_app", "inspect", "ping", "-d", "celery@$$HOSTNAME"]
+      test:
+        - CMD
+        - celery
+        - -A
+        - backend.workers.celery_app
+        - inspect
+        - ping
+        - -d
+        - "celery@$$HOSTNAME"
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 20s
+      start_period: 30s
+    logging: *default-logging
 
+  # ── Flower (Celery task monitor) ─────────────────────────────────────────────
   flower:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: celery -A backend.workers.celery_app flower --port=5555 --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-changeme}
+    restart: unless-stopped
+    command: >
+      celery -A backend.workers.celery_app flower
+      --port=5555
+      --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-changeme}
+      --url_prefix=flower
     ports:
-      - "5555:5555"
+      - "${FLOWER_PORT:-5555}:5555"
     env_file: .env
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - PYTHONUNBUFFERED=1
     depends_on:
       redis:
         condition: service_healthy
-    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5555/healthcheck"]
+      test: ["CMD", "curl", "-f", "http://localhost:5555/flower/healthcheck"]
       interval: 20s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 15s
+    logging: *default-logging
 
+  # ── Next.js frontend ─────────────────────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     environment:
+      # Evaluated at Next.js server startup (not build time) via next.config.mjs
       - NEXT_PUBLIC_API_URL=http://api:8000
     depends_on:
       api:
         condition: service_healthy
-    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000"]
       interval: 20s
       timeout: 5s
       retries: 3
-      start_period: 15s
-
-volumes:
-  forge_db:
-    driver: local
+      start_period: 20s
+    logging: *default-logging

@@ -1,23 +1,39 @@
 from contextlib import asynccontextmanager
+import logging
 import os
+import time
 
 import psutil
 import torch
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
-from backend.db.session import init_db
+from backend.db.session import init_db, engine
 from backend.api.routes import jobs, models, datasets, exports, asr, eval as eval_routes, chat
 
+# ── Logging ───────────────────────────────────────────────────────────────────
+_log_level = os.getenv("LOG_LEVEL", "info").upper()
+logging.basicConfig(
+    level=getattr(logging, _log_level, logging.INFO),
+    format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+logger = logging.getLogger("forge.api")
 
+
+# ── Startup / shutdown ────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    logger.info("Database initialised")
     yield
+    logger.info("API shutting down")
 
 
-app = FastAPI(title="Training Pipeline API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Forge Training API", version="1.0.0", lifespan=lifespan)
 
+# ── CORS ──────────────────────────────────────────────────────────────────────
 _raw_origins = os.getenv("FRONTEND_URL", "http://localhost:3000")
 _allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 app.add_middleware(
@@ -28,6 +44,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# ── Request logging middleware ────────────────────────────────────────────────
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    t0 = time.perf_counter()
+    response = await call_next(request)
+    ms = (time.perf_counter() - t0) * 1000
+    logger.info("%s %s → %d  (%.0f ms)", request.method, request.url.path, response.status_code, ms)
+    return response
+
+
+# ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(jobs.router)
 app.include_router(models.router)
 app.include_router(datasets.router)
@@ -37,11 +65,31 @@ app.include_router(eval_routes.router)
 app.include_router(chat.router)
 
 
+# ── Health ────────────────────────────────────────────────────────────────────
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    db_ok = False
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception:
+        pass
+
+    redis_ok = False
+    try:
+        import redis as _redis
+        _r = _redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), socket_connect_timeout=2)
+        _r.ping()
+        redis_ok = True
+    except Exception:
+        pass
+
+    status = "ok" if (db_ok and redis_ok) else "degraded"
+    return {"status": status, "db": db_ok, "redis": redis_ok}
 
 
+# ── System stats ──────────────────────────────────────────────────────────────
 @app.get("/api/system")
 def system_stats():
     gpu_info = []
