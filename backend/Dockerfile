@@ -25,7 +25,7 @@ RUN pip install --upgrade pip \
 # packaging + setuptools must be present before flash-attn builds with --no-build-isolation.
 # MAX_JOBS limits parallel C++ compilation to avoid OOM during flash-attn build.
 COPY requirements.txt .
-RUN pip install packaging setuptools \
+RUN pip install packaging setuptools wheel \
     && MAX_JOBS=4 pip install -r requirements.txt --no-build-isolation
 
 # Bake application code into the image (no dev bind-mounts in production)
