@@ -73,5 +73,6 @@ export interface SystemStats {
     total_mb: number;
     used_mb: number;
     free_mb: number;
+    utilization_percent: number | null;
   }[];
 }

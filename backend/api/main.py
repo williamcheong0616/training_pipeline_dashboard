@@ -4,7 +4,6 @@ import os
 import time
 
 import psutil
-import torch
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -89,22 +88,65 @@ def health():
     return {"status": status, "db": db_ok, "redis": redis_ok}
 
 
-# ── System stats ──────────────────────────────────────────────────────────────
-@app.get("/api/system")
-def system_stats():
-    gpu_info = []
-    if torch.cuda.is_available():
+def _get_gpu_info() -> list:
+    """Query real GPU memory via pynvml (nvidia-smi style), fall back to torch."""
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        count = pynvml.nvmlDeviceGetCount()
+        gpus = []
+        for i in range(count):
+            h = pynvml.nvmlDeviceGetHandleByIndex(i)
+            name = pynvml.nvmlDeviceGetName(h)
+            mem = pynvml.nvmlDeviceGetMemoryInfo(h)
+            util = pynvml.nvmlDeviceGetUtilizationRates(h)
+            gpus.append({
+                "index": i,
+                "name": name if isinstance(name, str) else name.decode(),
+                "total_mb": mem.total // (1024 ** 2),
+                "used_mb": mem.used // (1024 ** 2),
+                "free_mb": mem.free // (1024 ** 2),
+                "utilization_percent": util.gpu,
+            })
+        pynvml.nvmlShutdown()
+        return gpus
+    except Exception:
+        pass
+
+    # Fallback: torch (only sees memory allocated by this process)
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return []
+        gpus = []
         for i in range(torch.cuda.device_count()):
             props = torch.cuda.get_device_properties(i)
             allocated = torch.cuda.memory_allocated(i)
             total = props.total_memory
-            gpu_info.append({
+            gpus.append({
                 "index": i,
                 "name": props.name,
                 "total_mb": total // (1024 ** 2),
                 "used_mb": allocated // (1024 ** 2),
                 "free_mb": (total - allocated) // (1024 ** 2),
+                "utilization_percent": None,
             })
+        return gpus
+    except Exception:
+        return []
+
+
+# ── System stats ──────────────────────────────────────────────────────────────
+@app.get("/api/system")
+def system_stats():
+    gpu_info = _get_gpu_info()
+
+    cuda_available = False
+    try:
+        import torch
+        cuda_available = torch.cuda.is_available()
+    except Exception:
+        pass
 
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage(".")
@@ -115,5 +157,5 @@ def system_stats():
         "disk_total_gb": disk.total // (1024 ** 3),
         "disk_used_gb": disk.used // (1024 ** 3),
         "gpu": gpu_info,
-        "cuda_available": torch.cuda.is_available(),
+        "cuda_available": cuda_available,
     }
