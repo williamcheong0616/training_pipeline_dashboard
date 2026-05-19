@@ -2,6 +2,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { getJobs, cancelJob } from "@/lib/api";
+import { fmtDateTime } from "@/lib/datetime";
 import type { JobStatus } from "@/types";
 
 function badge(status: JobStatus) {
@@ -63,7 +64,7 @@ export default function JobsPage() {
                   <td><span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-dim)" }}>{j.peft_method}</span></td>
                   <td>{badge(j.status)}</td>
                   <td style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-dim)" }}>{elapsed(j.started_at, j.finished_at)}</td>
-                  <td style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>{new Date(j.created_at).toLocaleString()}</td>
+                  <td style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>{fmtDateTime(j.created_at)}</td>
                   <td style={{ textAlign: "right" }}>
                     {(j.status === "running" || j.status === "pending") ? (
                       <button className="lf-btn lf-btn-danger" style={{ height: 22, fontSize: 10, padding: "0 8px" }} onClick={() => cancel(j.id)}>stop</button>

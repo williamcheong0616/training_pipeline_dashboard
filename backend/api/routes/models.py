@@ -1,7 +1,7 @@
 from __future__ import annotations
 import asyncio
 import os
-from datetime import datetime
+from backend.utils.time import now_utc
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
@@ -52,7 +52,7 @@ def _download_model(hf_repo: str, local_path: str, model_id: int, db_factory):
         entry = db.get(ModelEntry, model_id)
         if entry:
             entry.is_downloaded = "true"
-            entry.downloaded_at = datetime.utcnow()
+            entry.downloaded_at = now_utc()
             db.commit()
     finally:
         db.close()

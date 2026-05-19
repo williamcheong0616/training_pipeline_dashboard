@@ -1,9 +1,10 @@
 from __future__ import annotations
 import abc
-from datetime import datetime
 from typing import Any, Dict
 
 from transformers import TrainerCallback, TrainerControl, TrainerState, TrainingArguments
+
+from backend.utils.time import now_utc
 
 
 class MetricLoggingCallback(TrainerCallback):
@@ -28,7 +29,7 @@ class MetricLoggingCallback(TrainerCallback):
                 learning_rate=logs.get("learning_rate"),
                 reward=logs.get("reward") or logs.get("rewards/chosen"),
                 grad_norm=logs.get("grad_norm"),
-                timestamp=datetime.utcnow(),
+                timestamp=now_utc(),
             )
             db.add(metric)
             db.commit()

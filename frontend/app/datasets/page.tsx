@@ -2,6 +2,7 @@
 import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getDatasets, uploadDataset, deleteDataset, previewDataset, convertDataset } from "@/lib/api";
+import { fmtDate } from "@/lib/datetime";
 import type { Dataset } from "@/types";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -389,7 +390,7 @@ export default function DatasetsPage() {
                     <td style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {d.description ?? "—"}
                     </td>
-                    <td style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>{new Date(d.created_at).toLocaleDateString()}</td>
+                    <td style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>{fmtDate(d.created_at)}</td>
                     <td onClick={(e) => e.stopPropagation()}>
                       <button className="lf-btn lf-btn-danger" style={{ height: 20, fontSize: 10, padding: "0 6px" }} onClick={() => remove(d.id)}>✕</button>
                     </td>

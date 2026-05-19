@@ -1,7 +1,7 @@
 from __future__ import annotations
 import asyncio
 import json
-from datetime import datetime
+from backend.utils.time import now_utc
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -100,7 +100,7 @@ def cancel_job(job_id: int, db: Session = Depends(get_db)):
         from backend.workers.celery_app import celery_app
         celery_app.control.revoke(job.celery_task_id, terminate=True)
     job.status = "cancelled"
-    job.finished_at = datetime.utcnow()
+    job.finished_at = now_utc()
     db.commit()
 
 

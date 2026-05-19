@@ -2,7 +2,8 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
+from backend.utils.time import now_utc
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
@@ -38,7 +39,7 @@ async def list_exports():
                     "name": p.name,
                     "path": str(p),
                     "size_mb": round(size_mb, 1),
-                    "created_at": datetime.fromtimestamp(p.stat().st_mtime).isoformat(),
+                    "created_at": datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc).isoformat(),
                 })
         return entries
     return await asyncio.to_thread(_scan)
@@ -90,7 +91,7 @@ def _merge_adapter(adapter_path: str, save_path: str):
 def export_from_path(body: PathExportRequest, background_tasks: BackgroundTasks):
     if not os.path.isdir(body.adapter_path):
         raise HTTPException(status_code=400, detail="Adapter path does not exist")
-    name = _safe_output_name(body.output_name, f"merged_custom_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}")
+    name = _safe_output_name(body.output_name, f"merged_custom_{now_utc().strftime('%Y%m%d_%H%M%S')}")
     try:
         save_path = _validated_save_path(name)
     except ValueError as e:

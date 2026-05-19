@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getJob, cancelJob, exportJob } from "@/lib/api";
+import { fmtDateTime } from "@/lib/datetime";
 import { useMetricsStream } from "@/lib/sse";
 import MetricsPanel from "@/components/MetricsPanel";
 import type { JobStatus } from "@/types";
@@ -45,7 +46,7 @@ export default function JobDetailPage() {
       `[system] Job #${job.id}: ${job.name}`,
       `[system] Method=${job.training_method.toUpperCase()}  PEFT=${job.peft_method}  Status=${job.status}`,
     ];
-    if (job.started_at) lines.push(`[system] Started: ${new Date(job.started_at).toLocaleString()}`);
+    if (job.started_at) lines.push(`[system] Started: ${fmtDateTime(job.started_at)}`);
     if (job.error_msg) lines.push(`[error] ${job.error_msg}`);
     setLogs(lines);
   }, [job?.id]);
@@ -103,9 +104,9 @@ export default function JobDetailPage() {
         <ConfigTable rows={[
           ["method",    job.training_method.toUpperCase()],
           ["peft",      job.peft_method],
-          ["created",   new Date(job.created_at).toLocaleString()],
-          ["started",   job.started_at ? new Date(job.started_at).toLocaleString() : "—"],
-          ["finished",  job.finished_at ? new Date(job.finished_at).toLocaleString() : "—"],
+          ["created",   fmtDateTime(job.created_at)],
+          ["started",   fmtDateTime(job.started_at)],
+          ["finished",  fmtDateTime(job.finished_at)],
           ["output",    job.output_dir ?? "—"],
         ]} />
 

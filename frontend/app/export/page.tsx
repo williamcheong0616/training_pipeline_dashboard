@@ -2,6 +2,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getJobs, getASRJobs, getExports, exportJob, exportFromPath } from "@/lib/api";
+import { fmtDate } from "@/lib/datetime";
 
 type ExportMode = "job" | "path";
 
@@ -167,7 +168,7 @@ export default function ExportPage() {
                     <tr key={exp.name}>
                       <td style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-hi)", fontWeight: 500 }}>{exp.name}</td>
                       <td style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-dim)" }}>{exp.size_mb.toFixed(0)} MB</td>
-                      <td style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>{new Date(exp.created_at).toLocaleDateString()}</td>
+                      <td style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>{fmtDate(exp.created_at)}</td>
                       <td style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{exp.path}</td>
                     </tr>
                   ))}

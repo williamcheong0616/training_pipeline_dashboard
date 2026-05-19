@@ -2,6 +2,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getJobs, getASRJobs, getJobMetrics, updateJobRemarks, purgeJob } from "@/lib/api";
+import { fmtDateTime } from "@/lib/datetime";
 import type { Job, JobStatus } from "@/types";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -18,9 +19,7 @@ function elapsed(started: string | null, finished: string | null) {
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 }
 
-function fmtDate(d: string) {
-  return new Date(d).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-}
+const fmtDate = fmtDateTime;
 
 const STATUS_COLORS: Record<JobStatus, string> = {
   pending: "var(--amber)", running: "var(--accent)",

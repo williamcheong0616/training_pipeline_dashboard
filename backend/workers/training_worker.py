@@ -1,6 +1,6 @@
 from __future__ import annotations
-from datetime import datetime
 
+from backend.utils.time import now_utc
 from backend.workers.celery_app import celery_app
 from backend.db.session import SessionLocal
 from backend.db.models import Job
@@ -40,7 +40,7 @@ def run_training_job(self, job_id: int):
             return {"error": f"Job {job_id} not found"}
 
         job.status = "running"
-        job.started_at = datetime.utcnow()
+        job.started_at = now_utc()
         job.celery_task_id = self.request.id
         db.commit()
 
@@ -49,7 +49,7 @@ def run_training_job(self, job_id: int):
 
         job = db.get(Job, job_id)
         job.status = "completed"
-        job.finished_at = datetime.utcnow()
+        job.finished_at = now_utc()
         db.commit()
         return {"status": "completed", "job_id": job_id}
 
@@ -58,7 +58,7 @@ def run_training_job(self, job_id: int):
         job = db.get(Job, job_id)
         if job:
             job.status = "failed"
-            job.finished_at = datetime.utcnow()
+            job.finished_at = now_utc()
             job.error_msg = str(exc)
             db.commit()
         raise
