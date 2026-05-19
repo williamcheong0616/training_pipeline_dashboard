@@ -36,7 +36,8 @@ RUN pip install -r requirements.txt
 
 # Compile and install flash-attn using the nvcc copied from the devel stage.
 # --no-build-isolation ensures the already-installed torch/numpy are visible.
-RUN MAX_JOBS=4 pip install flash-attn --no-build-isolation
+RUN pip install packaging setuptools wheel \
+    && MAX_JOBS=4 pip install flash-attn --no-build-isolation
 
 # Bake application code into the image (no dev bind-mounts in production)
 COPY . ./backend
