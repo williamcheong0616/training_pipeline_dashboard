@@ -1,9 +1,9 @@
 from __future__ import annotations
 import abc
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-from transformers import TrainerCallback, TrainerControl, TrainerState, TrainingArguments
+from transformers import TrainerCallback, TrainerControl, TrainerState, TrainingArguments  # TrainingArguments kept for type hints in on_log
 
 
 class MetricLoggingCallback(TrainerCallback):
@@ -49,7 +49,6 @@ class BasePipelineTrainer(abc.ABC):
     def train(self) -> None: ...
 
     def _device_map(self) -> str:
-        """Return a HuggingFace device_map value from the job config's gpu_id field."""
         gpu_id = self.config.get("gpu_id", "auto")
         if gpu_id and str(gpu_id) != "auto":
             try:
@@ -58,9 +57,15 @@ class BasePipelineTrainer(abc.ABC):
                 pass
         return "auto"
 
-    def _training_args(self, output_dir: str, **overrides) -> TrainingArguments:
+    def _training_args(self, output_dir: str, **overrides) -> Dict[str, Any]:
+        """Return a plain dict of constructor kwargs for any XxxConfig/TrainingArguments.
+
+        Returning a dict (not a TrainingArguments instance) prevents computed
+        attributes like `mixed_precision` from leaking into subclass Config
+        constructors that don't accept them.
+        """
         cfg = self.config
-        return TrainingArguments(
+        args: Dict[str, Any] = dict(
             output_dir=output_dir,
             num_train_epochs=cfg.get("num_epochs", 3),
             per_device_train_batch_size=cfg.get("batch_size", 4),
@@ -74,5 +79,6 @@ class BasePipelineTrainer(abc.ABC):
             fp16=cfg.get("fp16", False),
             bf16=cfg.get("bf16", True),
             report_to="none",
-            **overrides,
         )
+        args.update(overrides)
+        return args

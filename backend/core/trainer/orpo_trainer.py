@@ -30,7 +30,7 @@ class ORPOPipelineTrainer(BasePipelineTrainer):
         dataset = Dataset.from_list(raw)
 
         orpo_config = ORPOConfig(
-            **vars(self._training_args(output_dir)),
+            **self._training_args(output_dir),
             lambda_=cfg.get("lambda_", 0.1),
             max_length=cfg.get("max_seq_length", 2048),
         )

@@ -5,7 +5,7 @@ without any instruction template — suitable for domain adaptation.
 """
 from __future__ import annotations
 
-from transformers import Trainer
+from transformers import Trainer, TrainingArguments
 
 from backend.core.model.loader import load_model, load_tokenizer
 from backend.core.model.patcher import patch_model
@@ -52,7 +52,7 @@ class UnsupervisedPipelineTrainer(BasePipelineTrainer):
         callbacks = [self.callback] if self.callback else []
         trainer = Trainer(
             model=model,
-            args=self._training_args(output_dir),
+            args=TrainingArguments(**self._training_args(output_dir)),
             train_dataset=dataset,
             data_collator=collator,
             callbacks=callbacks,

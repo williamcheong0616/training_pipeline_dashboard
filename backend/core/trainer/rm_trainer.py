@@ -29,7 +29,7 @@ class RMPipelineTrainer(BasePipelineTrainer):
         dataset = Dataset.from_list(raw)
 
         reward_config = RewardConfig(
-            **vars(self._training_args(output_dir)),
+            **self._training_args(output_dir),
             max_length=cfg.get("max_seq_length", 2048),
         )
 

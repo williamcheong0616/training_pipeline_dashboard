@@ -46,7 +46,7 @@ class SFTPipelineTrainer(BasePipelineTrainer):
         )
 
         sft_config = SFTConfig(
-            **vars(self._training_args(output_dir)),
+            **self._training_args(output_dir),
             max_seq_length=cfg.get("max_seq_length", 2048),
             packing=cfg.get("packing", False),
         )

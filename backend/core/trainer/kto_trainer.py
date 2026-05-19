@@ -30,7 +30,7 @@ class KTOPipelineTrainer(BasePipelineTrainer):
         dataset = Dataset.from_list(raw)
 
         kto_config = KTOConfig(
-            **vars(self._training_args(output_dir)),
+            **self._training_args(output_dir),
             beta=cfg.get("beta", 0.1),
             desirable_weight=cfg.get("desirable_weight", 1.0),
             undesirable_weight=cfg.get("undesirable_weight", 1.0),

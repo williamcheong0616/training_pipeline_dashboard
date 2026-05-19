@@ -36,7 +36,7 @@ class DPOPipelineTrainer(BasePipelineTrainer):
         dataset = Dataset.from_list(raw)
 
         dpo_config = DPOConfig(
-            **vars(self._training_args(output_dir)),
+            **self._training_args(output_dir),
             beta=cfg.get("beta", 0.1),
             loss_type=cfg.get("loss_type", "sigmoid"),
             max_length=cfg.get("max_seq_length", 2048),
