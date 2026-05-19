@@ -1,4 +1,4 @@
-.PHONY: setup build up down restart ps logs logs-api logs-worker logs-flower \
+.PHONY: setup build up down restart ps ip logs logs-api logs-worker logs-flower \
         shell-api shell-worker shell-redis db-backup clean prune
 
 # ── First-time workstation setup ──────────────────────────────────────────────
@@ -32,6 +32,15 @@ restart:
 
 ps:
 	docker compose ps
+
+# Print the LAN URL teammates should use ──────────────────────────────────────
+ip:
+	@LAN_IP=$$(ip route get 1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($$i=="src") print $$(i+1); exit}' \
+	  || ipconfig getifaddr en0 2>/dev/null \
+	  || hostname -I 2>/dev/null | awk '{print $$1}'); \
+	PORT=$$(grep -s FRONTEND_PORT .env | cut -d= -f2 || echo 3000); \
+	echo "Share this URL with teammates:"; \
+	echo "  http://$$LAN_IP:$${PORT:-3000}"
 
 # ── Logs (live-follow, last 100 lines) ────────────────────────────────────────
 logs:
