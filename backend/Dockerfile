@@ -1,15 +1,9 @@
-# ── Stage 1: dependency install ───────────────────────────────────────────────
-# Using CUDA 12.6 runtime as the base; update this tag once NVIDIA publishes
-# official CUDA 13.0 images and the cu130 PyTorch wheels are stable.
-FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu22.04 AS base
+# pytorch/pytorch already includes Python, pip, CUDA, and cuDNN — no apt needed.
+# Update the tag here when a cu130-based image is published.
+# Current: CUDA 12.4 + cuDNN 9 (closest available to cu130 requirements).
+FROM pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime
 
-# Install Python 3.12 + minimal system deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3.12 python3.12-dev python3-pip python3.12-venv \
-        curl git \
-    && ln -sf python3.12 /usr/bin/python3 \
-    && ln -sf python3    /usr/bin/python \
-    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -17,20 +11,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-WORKDIR /app
+# Install system deps only (no Python install needed — it's in the base image)
+RUN apt-get update && apt-get install -y --no-install-recommends curl git \
+    && rm -rf /var/lib/apt/lists/*
 
-# ── Stage 2: install Python packages (cached layer) ───────────────────────────
-FROM base AS deps
+# Install Python dependencies (cached layer — rebuilds only when requirements change)
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
-
-# ── Stage 3: final image ──────────────────────────────────────────────────────
-FROM deps AS runner
+RUN pip install --upgrade pip \
+    && pip install -r requirements.txt
 
 # Bake application code into the image (no dev bind-mounts in production)
 COPY . ./backend
 
-# Non-root user for safety
+# Non-root user
 RUN useradd -m -u 1000 -s /bin/bash forge \
     && chown -R forge:forge /app
 USER forge
