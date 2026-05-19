@@ -1,7 +1,7 @@
-# pytorch/pytorch already includes Python, pip, CUDA, and cuDNN — no apt needed.
-# Update the tag here when a cu130-based image is published.
-# Current: CUDA 12.4 + cuDNN 9 (closest available to cu130 requirements).
-FROM pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime
+# python:3.12-slim is Debian Bookworm — stable apt mirrors, no Ubuntu hash issues.
+# CUDA 13.0 libraries are injected at runtime by the NVIDIA Container Toolkit
+# (runtime: nvidia in docker-compose.yml) from the host driver installation.
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -11,14 +11,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system deps only (no Python install needed — it's in the base image)
-RUN apt-get update && apt-get install -y --no-install-recommends curl git \
+# ffmpeg required by librosa / soundfile for audio processing
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies (cached layer — rebuilds only when requirements change)
-COPY requirements.txt .
+# Install PyTorch + torchvision from the cu130 wheel index first so that
+# the subsequent requirements install does not overwrite them with a CPU build.
 RUN pip install --upgrade pip \
-    && pip install -r requirements.txt
+    && pip install torch torchvision \
+       --index-url https://download.pytorch.org/whl/cu130
+
+# Install remaining Python dependencies (torch already satisfied, will be skipped)
+COPY requirements.txt .
+RUN pip install -r requirements.txt
 
 # Bake application code into the image (no dev bind-mounts in production)
 COPY . ./backend
