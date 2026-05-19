@@ -11,9 +11,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# ffmpeg required by librosa / soundfile for audio processing
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+# ffmpeg — copied from a static-binary image, no apt needed
+COPY --from=mwader/static-ffmpeg:latest /ffmpeg  /usr/local/bin/ffmpeg
+COPY --from=mwader/static-ffmpeg:latest /ffprobe /usr/local/bin/ffprobe
 
 # Install PyTorch + torchvision from the cu130 wheel index first so that
 # the subsequent requirements install does not overwrite them with a CPU build.
