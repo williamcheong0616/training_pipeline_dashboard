@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         software-properties-common ca-certificates gnupg \
     && add-apt-repository ppa:deadsnakes/ppa \
     && apt-get update && apt-get install -y --no-install-recommends \
-        python3.12 python3.12-dev python3.12-distutils python3-pip \
+        python3.12 python3.12-dev python3-pip \
     && update-alternatives --install /usr/bin/python  python  /usr/bin/python3.12 1 \
     && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 \
     && rm -rf /var/lib/apt/lists/*
