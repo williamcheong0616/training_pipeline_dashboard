@@ -165,8 +165,9 @@ services:
       # Bind explicitly to all interfaces so machines on the LAN can connect.
       - "0.0.0.0:${FRONTEND_PORT:-3000}:3000"
     environment:
-      # Evaluated at Next.js server startup (not build time) via next.config.mjs
-      - NEXT_PUBLIC_API_URL=http://api:8000
+      # Server-side only (no NEXT_PUBLIC_ prefix) — read at runtime, not baked
+      # into the bundle at build time, so the Docker service name resolves correctly.
+      - API_URL=http://api:8000
     depends_on:
       api:
         condition: service_healthy
