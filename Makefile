@@ -76,7 +76,8 @@ db-backup:
 
 # Install flash-attn inside the running worker (needs live CUDA + nvcc from host) ──
 install-flash-attn:
-	docker compose exec worker pip install flash-attn --no-build-isolation
+	docker compose exec -u root worker pip install packaging setuptools wheel
+	docker compose exec -u root worker pip install flash-attn --no-build-isolation
 
 db-restore:
 	@[ -n "$(FILE)" ] || (echo "Usage: make db-restore FILE=backups/forge_YYYYMMDD_HHMMSS.db" && exit 1)
