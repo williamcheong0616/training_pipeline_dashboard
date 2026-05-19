@@ -1,7 +1,6 @@
-# python:3.12 (full Debian Bookworm) ships with gcc/g++/make — no apt needed.
-# CUDA 13.0 libraries are injected at runtime by the NVIDIA Container Toolkit
-# (runtime: nvidia in docker-compose.yml) from the host driver installation.
-FROM python:3.12
+# nvidia/cuda:12.6.3-devel ships gcc/g++/make/nvcc — all needed for flash-attn compilation.
+# CUDA 12.6 runtime libraries are also injected at runtime by the NVIDIA Container Toolkit.
+FROM nvidia/cuda:12.6.3-devel-ubuntu22.04
 
 WORKDIR /app
 
@@ -9,21 +8,37 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    CUDA_HOME=/usr/local/cuda
+
+# Install Python 3.12 via deadsnakes PPA
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        software-properties-common ca-certificates gnupg \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        python3.12 python3.12-dev python3.12-distutils python3-pip \
+    && update-alternatives --install /usr/bin/python  python  /usr/bin/python3.12 1 \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 \
+    && rm -rf /var/lib/apt/lists/*
 
 # ffmpeg — copied from a static-binary image, no apt needed
 COPY --from=mwader/static-ffmpeg:latest /ffmpeg  /usr/local/bin/ffmpeg
 COPY --from=mwader/static-ffmpeg:latest /ffprobe /usr/local/bin/ffprobe
 
-# Install PyTorch + torchvision from the cu130 wheel index first so that
+# Install PyTorch + torchvision from the cu126 wheel index first so that
 # the subsequent requirements install does not overwrite them with a CPU build.
 RUN pip install --upgrade pip \
     && pip install torch torchvision \
-       --index-url https://download.pytorch.org/whl/cu130
+       --index-url https://download.pytorch.org/whl/cu126
 
 # Install remaining Python dependencies (torch already satisfied, will be skipped)
 COPY requirements.txt .
 RUN pip install -r requirements.txt
+
+# Compile and install flash-attn using the nvcc that ships in this image.
+# --no-build-isolation ensures the already-installed torch/numpy are visible.
+RUN MAX_JOBS=4 pip install flash-attn --no-build-isolation
 
 # Bake application code into the image (no dev bind-mounts in production)
 COPY . ./backend
