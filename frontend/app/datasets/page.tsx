@@ -27,7 +27,7 @@ function confidenceColor(c: string) {
 function SampleCard({ record, index }: { record: Record<string, unknown>; index: number }) {
   const KEY_ORDER = ["instruction", "input", "output", "prompt", "chosen", "rejected",
     "completion", "label", "text", "conversations", "messages"];
-  const keys = [...new Set([...KEY_ORDER.filter((k) => k in record), ...Object.keys(record)])];
+  const keys = Array.from(new Set([...KEY_ORDER.filter((k) => k in record), ...Object.keys(record)]));
 
   return (
     <div style={{
