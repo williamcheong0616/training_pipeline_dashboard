@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from datasets import Dataset
 from trl import RewardTrainer, RewardConfig
+from transformers import AutoModelForSequenceClassification
 
 from backend.core.model.loader import load_tokenizer
-from transformers import AutoModelForSequenceClassification
-from backend.core.model.patcher import patch_model
 from .base_trainer import BasePipelineTrainer
 
 
@@ -21,16 +23,14 @@ class RMPipelineTrainer(BasePipelineTrainer):
             model_path, num_labels=1, trust_remote_code=True,
             device_map=self._device_map(),
         )
-        model = patch_model(model)
+        model = self._prepare_model(model)
 
-        import json
-        from pathlib import Path
         raw = json.loads(Path(cfg["dataset_path"]).read_text())
         dataset = Dataset.from_list(raw)
 
         reward_config = RewardConfig(
             **self._training_args(output_dir),
-            max_length=cfg.get("max_seq_length", 2048),
+            max_length=int(cfg.get("max_seq_length", 2048)),
         )
 
         callbacks = [self.callback] if self.callback else []

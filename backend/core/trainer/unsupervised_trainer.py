@@ -1,14 +1,9 @@
-"""Unsupervised / Continued Pre-Training (CPT) trainer.
-
-Trains on raw text using causal language modeling loss (next-token prediction)
-without any instruction template — suitable for domain adaptation.
-"""
+"""Unsupervised / Continued Pre-Training (CPT) trainer."""
 from __future__ import annotations
 
 from transformers import Trainer, TrainingArguments
 
 from backend.core.model.loader import load_model, load_tokenizer
-from backend.core.model.patcher import patch_model
 from backend.core.model.adapter import apply_lora
 from backend.core.data.dataset import build_plain_text_dataset
 from backend.core.data.collator import get_clm_collator
@@ -30,22 +25,22 @@ class UnsupervisedPipelineTrainer(BasePipelineTrainer):
             use_flash_attention=cfg.get("use_flash_attention", False),
             device_map=self._device_map(),
         )
-        model = patch_model(model, gradient_checkpointing=True)
+        model = self._prepare_model(model, gradient_checkpointing=True)
 
         if peft_method in ("lora", "qlora", "dora"):
             model = apply_lora(
                 model,
-                r=cfg.get("lora_r", 16),
-                lora_alpha=cfg.get("lora_alpha", 32),
+                r=int(cfg.get("lora_r", 16)),
+                lora_alpha=int(cfg.get("lora_alpha", 32)),
                 target_modules=cfg.get("target_modules"),
-                lora_dropout=cfg.get("lora_dropout", 0.05),
+                lora_dropout=float(cfg.get("lora_dropout", 0.05)),
                 use_dora=(peft_method == "dora"),
             )
 
         dataset = build_plain_text_dataset(
             path_or_repo=cfg["dataset_path"],
             tokenizer=tokenizer,
-            max_length=cfg.get("max_seq_length", 2048),
+            max_length=int(cfg.get("max_seq_length", 2048)),
         )
         collator = get_clm_collator(tokenizer)
 

@@ -1,10 +1,8 @@
 from __future__ import annotations
-from typing import Any, Dict
 
 from trl import SFTTrainer, SFTConfig
 
 from backend.core.model.loader import load_model, load_tokenizer
-from backend.core.model.patcher import patch_model
 from backend.core.model.adapter import apply_lora
 from backend.core.data.dataset import build_dataset
 from .base_trainer import BasePipelineTrainer
@@ -25,30 +23,35 @@ class SFTPipelineTrainer(BasePipelineTrainer):
             use_flash_attention=cfg.get("use_flash_attention", False),
             device_map=self._device_map(),
         )
-        model = patch_model(model, gradient_checkpointing=True)
+
+        # For quantized (QLoRA) models peft's kbit prepare must run before LoRA.
+        # It handles gradient checkpointing correctly for frozen quantized layers.
+        model = self._prepare_model(model, gradient_checkpointing=True)
 
         if peft_method in ("lora", "qlora", "dora"):
             model = apply_lora(
                 model,
-                r=cfg.get("lora_r", 16),
-                lora_alpha=cfg.get("lora_alpha", 32),
+                r=int(cfg.get("lora_r", 16)),
+                lora_alpha=int(cfg.get("lora_alpha", 32)),
                 target_modules=cfg.get("target_modules"),
-                lora_dropout=cfg.get("lora_dropout", 0.05),
+                lora_dropout=float(cfg.get("lora_dropout", 0.05)),
                 use_dora=(peft_method == "dora"),
             )
 
+        # Dataset is pre-tokenized here with the correct max_length.
         dataset = build_dataset(
             path_or_repo=cfg["dataset_path"],
             format=cfg.get("dataset_format", "alpaca"),
             template_name=cfg.get("template", "alpaca"),
             tokenizer=tokenizer,
-            max_length=cfg.get("max_seq_length", 2048),
+            max_length=int(cfg.get("max_seq_length", 2048)),
         )
 
+        # max_seq_length was removed from SFTConfig in newer trl versions.
+        # The dataset is already tokenized so we don't need to pass it here.
         sft_config = SFTConfig(
             **self._training_args(output_dir),
-            max_seq_length=cfg.get("max_seq_length", 2048),
-            packing=cfg.get("packing", False),
+            packing=bool(cfg.get("packing", False)),
         )
 
         callbacks = [self.callback] if self.callback else []

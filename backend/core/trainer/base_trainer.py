@@ -3,7 +3,7 @@ import abc
 from datetime import datetime
 from typing import Any, Dict
 
-from transformers import TrainerCallback, TrainerControl, TrainerState, TrainingArguments  # TrainingArguments kept for type hints in on_log
+from transformers import TrainerCallback, TrainerControl, TrainerState, TrainingArguments
 
 
 class MetricLoggingCallback(TrainerCallback):
@@ -57,28 +57,54 @@ class BasePipelineTrainer(abc.ABC):
                 pass
         return "auto"
 
+    def _prepare_model(self, model, gradient_checkpointing: bool = True):
+        """Apply gradient checkpointing correctly for both normal and quantized models.
+
+        Quantized models (4bit/8bit) must use peft's prepare_model_for_kbit_training
+        instead of the plain gradient_checkpointing_enable() path, or gradients
+        won't flow through the frozen quantized layers.
+        """
+        if self.config.get("quantization") in ("4bit", "8bit"):
+            from peft import prepare_model_for_kbit_training
+            return prepare_model_for_kbit_training(
+                model,
+                use_gradient_checkpointing=gradient_checkpointing,
+            )
+        from backend.core.model.patcher import patch_model
+        return patch_model(model, gradient_checkpointing=gradient_checkpointing)
+
     def _training_args(self, output_dir: str, **overrides) -> Dict[str, Any]:
         """Return a plain dict of constructor kwargs for any XxxConfig/TrainingArguments.
 
-        Returning a dict (not a TrainingArguments instance) prevents computed
-        attributes like `mixed_precision` from leaking into subclass Config
-        constructors that don't accept them.
+        Returns a dict (not a TrainingArguments instance) so no computed attributes
+        like mixed_precision can leak into trl Config constructors that don't accept them.
+        All values are explicitly cast to the expected type so string values from the
+        frontend form don't cause TypeErrors.
         """
+        import torch
         cfg = self.config
+
+        # Auto-select bf16/fp16: prefer bf16 on supporting hardware, never set both.
+        bf16 = bool(cfg.get("bf16", True)) and torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+        fp16 = bool(cfg.get("fp16", False)) and not bf16
+
         args: Dict[str, Any] = dict(
             output_dir=output_dir,
-            num_train_epochs=cfg.get("num_epochs", 3),
-            per_device_train_batch_size=cfg.get("batch_size", 4),
-            per_device_eval_batch_size=cfg.get("eval_batch_size", 4),
-            gradient_accumulation_steps=cfg.get("gradient_accumulation_steps", 1),
-            learning_rate=cfg.get("learning_rate", 2e-4),
-            warmup_ratio=cfg.get("warmup_ratio", 0.05),
+            num_train_epochs=int(cfg.get("num_epochs", 3)),
+            per_device_train_batch_size=int(cfg.get("batch_size", 4)),
+            per_device_eval_batch_size=int(cfg.get("eval_batch_size", 4)),
+            gradient_accumulation_steps=int(cfg.get("gradient_accumulation_steps", 1)),
+            learning_rate=float(cfg.get("learning_rate", 2e-4)),
+            warmup_ratio=float(cfg.get("warmup_ratio", 0.05)),
             lr_scheduler_type=cfg.get("lr_scheduler", "cosine"),
-            logging_steps=cfg.get("logging_steps", 10),
+            logging_steps=int(cfg.get("logging_steps", 10)),
             save_strategy="epoch",
-            fp16=cfg.get("fp16", False),
-            bf16=cfg.get("bf16", True),
+            max_grad_norm=float(cfg.get("max_grad_norm", 1.0)),
+            seed=int(cfg.get("seed", 42)),
+            fp16=fp16,
+            bf16=bf16,
             report_to="none",
+            dataloader_num_workers=int(cfg.get("dataloader_num_workers", 0)),
         )
         args.update(overrides)
         return args
