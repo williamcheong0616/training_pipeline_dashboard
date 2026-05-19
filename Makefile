@@ -87,18 +87,19 @@ install-flash-attn:
 	  echo "      sudo apt install cuda-toolkit-13-0"; \
 	  exit 1; \
 	}; \
-	CUDA="$$(realpath "$$(dirname "$$(dirname "$$NVCC")")")"; \
-	echo "Found nvcc : $$NVCC"; \
-	echo "CUDA_HOME  : $$CUDA"; \
+	HOST_CUDA="$$(realpath "$$(dirname "$$(dirname "$$NVCC")")")"; \
+	echo "Found nvcc  : $$NVCC"; \
+	echo "Host CUDA   : $$HOST_CUDA"; \
+	echo "Container   : /usr/local/cuda (mount point)"; \
 	IMG=$$(docker inspect "$$(docker compose ps -q worker)" --format='{{.Config.Image}}' 2>/dev/null); \
 	[ -n "$$IMG" ] || { echo "❌  worker container not running — run: make up"; exit 1; }; \
 	WHEELDIR=$$(mktemp -d); \
 	echo "Building flash-attn wheel (this takes ~10 min)..."; \
 	docker run --rm --runtime=nvidia \
 	  -u root \
-	  -e CUDA_HOME="$$CUDA" \
-	  -e PATH="$$CUDA/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-	  -v "$$CUDA:/usr/local/cuda:ro" \
+	  -e CUDA_HOME=/usr/local/cuda \
+	  -e PATH=/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+	  -v "$$HOST_CUDA:/usr/local/cuda:ro" \
 	  -v "$$WHEELDIR:/wheels" \
 	  "$$IMG" \
 	  sh -c "pip install packaging setuptools wheel && \
