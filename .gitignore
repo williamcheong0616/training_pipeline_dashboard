@@ -21,9 +21,8 @@ frontend/.next/
 frontend/out/
 frontend/tsconfig.tsbuildinfo
 
-# ── Local scripts ─────────────────────────────────────────────────────────────
-*.py
-!backend/**/*.py
+# ── Local scripts (root-level only) ──────────────────────────────────────────
+/*.py
 
 # ── ML artifacts (large binaries — never commit) ──────────────────────────────
 models/
