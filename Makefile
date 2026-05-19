@@ -1,5 +1,5 @@
 .PHONY: setup build up down restart ps ip logs logs-api logs-worker logs-flower \
-        shell-api shell-worker shell-redis db-backup clean prune
+        shell-api shell-worker shell-redis db-backup install-flash-attn clean prune
 
 # ── First-time workstation setup ──────────────────────────────────────────────
 setup:
@@ -73,6 +73,10 @@ db-backup:
 	@mkdir -p backups
 	@cp data/db/forge.db backups/forge_$$(date +%Y%m%d_%H%M%S).db
 	@echo "✓  Backup saved to backups/"
+
+# Install flash-attn inside the running worker (needs live CUDA + nvcc from host) ──
+install-flash-attn:
+	docker compose exec worker pip install flash-attn --no-build-isolation
 
 db-restore:
 	@[ -n "$(FILE)" ] || (echo "Usage: make db-restore FILE=backups/forge_YYYYMMDD_HHMMSS.db" && exit 1)

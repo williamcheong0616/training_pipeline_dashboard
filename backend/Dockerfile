@@ -21,12 +21,9 @@ RUN pip install --upgrade pip \
     && pip install torch torchvision \
        --index-url https://download.pytorch.org/whl/cu130
 
-# Install remaining Python dependencies (torch already satisfied, will be skipped).
-# packaging + setuptools must be present before flash-attn builds with --no-build-isolation.
-# MAX_JOBS limits parallel C++ compilation to avoid OOM during flash-attn build.
+# Install remaining Python dependencies (torch already satisfied, will be skipped)
 COPY requirements.txt .
-RUN pip install packaging setuptools wheel \
-    && MAX_JOBS=4 pip install -r requirements.txt --no-build-isolation
+RUN pip install -r requirements.txt
 
 # Bake application code into the image (no dev bind-mounts in production)
 COPY . ./backend

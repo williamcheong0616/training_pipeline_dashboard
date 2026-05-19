@@ -1,6 +1,7 @@
 --extra-index-url https://download.pytorch.org/whl/cu130
 torch>=2.3
-flash-attn>=2.6
+# flash-attn requires nvcc to compile and must be installed inside the running
+# container (where CUDA is live). Run: make install-flash-attn
 transformers>=4.44
 peft>=0.11
 trl>=0.9
