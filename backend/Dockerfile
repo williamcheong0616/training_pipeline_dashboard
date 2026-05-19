@@ -1,6 +1,6 @@
-# nvidia/cuda:13.0.1-devel ships gcc/g++/make/nvcc — all needed for flash-attn compilation.
+# nvidia/cuda:13.0.1-devel-ubuntu24.04 ships gcc/g++/make/nvcc and Python 3.12 natively.
 # CUDA 13.0 runtime libraries are also injected at runtime by the NVIDIA Container Toolkit.
-FROM nvidia/cuda:13.0.1-devel-ubuntu22.04
+FROM nvidia/cuda:13.0.1-devel-ubuntu24.04
 
 WORKDIR /app
 
@@ -12,11 +12,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DEBIAN_FRONTEND=noninteractive \
     CUDA_HOME=/usr/local/cuda
 
-# Install Python 3.12 via deadsnakes PPA
+# Install Python 3.12 (ships natively in Ubuntu 24.04 — no PPA needed)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        software-properties-common ca-certificates gnupg \
-    && add-apt-repository ppa:deadsnakes/ppa \
-    && apt-get update && apt-get install -y --no-install-recommends \
         python3.12 python3.12-dev python3-pip \
     && update-alternatives --install /usr/bin/python  python  /usr/bin/python3.12 1 \
     && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 \
