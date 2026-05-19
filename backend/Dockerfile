@@ -1,6 +1,6 @@
-# nvidia/cuda:12.6.3-devel ships gcc/g++/make/nvcc — all needed for flash-attn compilation.
-# CUDA 12.6 runtime libraries are also injected at runtime by the NVIDIA Container Toolkit.
-FROM nvidia/cuda:12.6.3-devel-ubuntu22.04
+# nvidia/cuda:13.0.1-devel ships gcc/g++/make/nvcc — all needed for flash-attn compilation.
+# CUDA 13.0 runtime libraries are also injected at runtime by the NVIDIA Container Toolkit.
+FROM nvidia/cuda:13.0.1-devel-ubuntu22.04
 
 WORKDIR /app
 
@@ -30,7 +30,7 @@ COPY --from=mwader/static-ffmpeg:latest /ffprobe /usr/local/bin/ffprobe
 # the subsequent requirements install does not overwrite them with a CPU build.
 RUN pip install --upgrade pip \
     && pip install torch torchvision \
-       --index-url https://download.pytorch.org/whl/cu126
+       --index-url https://download.pytorch.org/whl/cu130
 
 # Install remaining Python dependencies (torch already satisfied, will be skipped)
 COPY requirements.txt .
