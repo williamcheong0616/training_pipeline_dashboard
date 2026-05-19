@@ -74,16 +74,43 @@ db-backup:
 	@cp data/db/forge.db backups/forge_$$(date +%Y%m%d_%H%M%S).db
 	@echo "✓  Backup saved to backups/"
 
-# Install flash-attn inside the running worker (needs live CUDA + nvcc from host) ──
+# Install flash-attn — builds wheel in a one-shot container (auto-detects nvcc on host)
+# then copies and installs the pre-built wheel into the running worker.
+# Re-run after `make up` if the worker container is recreated.
 install-flash-attn:
-	@CUDA=$${CUDA_HOME:-/usr/local/cuda}; \
-	echo "Using CUDA toolkit at: $$CUDA"; \
-	docker compose exec -u root worker pip install packaging setuptools wheel; \
-	docker compose exec -u root \
-	  -e CUDA_HOME=$$CUDA \
-	  -e PATH=$$CUDA/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-	  worker \
-	  sh -c "MAX_JOBS=4 pip install flash-attn --no-build-isolation"
+	@NVCC=$$(command -v nvcc 2>/dev/null \
+	  || find /usr/local/cuda*/bin /usr/local/cuda/bin /usr/bin -name nvcc 2>/dev/null \
+	     | sort -rV | head -1); \
+	[ -n "$$NVCC" ] || { \
+	  echo "❌  nvcc not found on host."; \
+	  echo "    Install the CUDA toolkit devel package, e.g.:"; \
+	  echo "      sudo apt install cuda-toolkit-13-0"; \
+	  exit 1; \
+	}; \
+	CUDA="$$(realpath "$$(dirname "$$(dirname "$$NVCC")")")"; \
+	echo "Found nvcc : $$NVCC"; \
+	echo "CUDA_HOME  : $$CUDA"; \
+	IMG=$$(docker inspect "$$(docker compose ps -q worker)" --format='{{.Config.Image}}' 2>/dev/null); \
+	[ -n "$$IMG" ] || { echo "❌  worker container not running — run: make up"; exit 1; }; \
+	WHEELDIR=$$(mktemp -d); \
+	echo "Building flash-attn wheel (this takes ~10 min)..."; \
+	docker run --rm --runtime=nvidia \
+	  -u root \
+	  -e CUDA_HOME="$$CUDA" \
+	  -e PATH="$$CUDA/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+	  -v "$$CUDA:/usr/local/cuda:ro" \
+	  -v "$$WHEELDIR:/wheels" \
+	  "$$IMG" \
+	  sh -c "pip install packaging setuptools wheel && \
+	         MAX_JOBS=4 pip wheel flash-attn --no-build-isolation -w /wheels"; \
+	WHEEL=$$(ls "$$WHEELDIR"/flash_attn-*.whl 2>/dev/null | head -1); \
+	[ -n "$$WHEEL" ] || { echo "❌  wheel build failed"; rm -rf "$$WHEELDIR"; exit 1; }; \
+	echo "Installing wheel into running worker..."; \
+	WORKER_ID=$$(docker compose ps -q worker); \
+	docker cp "$$WHEEL" "$$WORKER_ID:/tmp/flash_attn.whl"; \
+	docker compose exec -u root worker pip install /tmp/flash_attn.whl; \
+	rm -rf "$$WHEELDIR"; \
+	echo "✓  flash-attn installed"
 
 db-restore:
 	@[ -n "$(FILE)" ] || (echo "Usage: make db-restore FILE=backups/forge_YYYYMMDD_HHMMSS.db" && exit 1)
