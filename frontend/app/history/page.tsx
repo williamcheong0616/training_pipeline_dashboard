@@ -61,7 +61,7 @@ function MetricsChart({ jobId }: { jobId: number }) {
   const hasLR      = raw.some((r) => r.learning_rate != null);
   const hasGNorm   = raw.some((r) => r.grad_norm != null);
 
-  const data = raw.map((r) => ({ step: r.step, ...r }));
+  const data = raw.map((r) => ({ ...r }));
 
   const tickStyle = { fontFamily: "var(--mono)", fontSize: 10, fill: "var(--text-dim)" };
   const tooltipStyle = {
