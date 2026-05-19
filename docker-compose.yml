@@ -96,7 +96,17 @@ services:
       - PYTHONUNBUFFERED=1
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-    volumes: *data-volumes
+      # nvcc path for flash-attn compilation (make install-flash-attn)
+      - CUDA_HOME=${CUDA_HOME:-/usr/local/cuda}
+      - PATH=/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    volumes:
+      - ./models:/app/models
+      - ./datasets:/app/datasets
+      - ./outputs:/app/outputs
+      - ./exports:/app/exports
+      - ./data/db:/app/data
+      # Mount host CUDA toolkit so nvcc is available for flash-attn compilation
+      - ${CUDA_HOME:-/usr/local/cuda}:/usr/local/cuda:ro
     depends_on:
       redis:
         condition: service_healthy

@@ -76,8 +76,14 @@ db-backup:
 
 # Install flash-attn inside the running worker (needs live CUDA + nvcc from host) ──
 install-flash-attn:
-	docker compose exec -u root worker pip install packaging setuptools wheel
-	docker compose exec -u root worker pip install flash-attn --no-build-isolation
+	@CUDA=$${CUDA_HOME:-/usr/local/cuda}; \
+	echo "Using CUDA toolkit at: $$CUDA"; \
+	docker compose exec -u root worker pip install packaging setuptools wheel; \
+	docker compose exec -u root \
+	  -e CUDA_HOME=$$CUDA \
+	  -e PATH=$$CUDA/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+	  worker \
+	  sh -c "MAX_JOBS=4 pip install flash-attn --no-build-isolation"
 
 db-restore:
 	@[ -n "$(FILE)" ] || (echo "Usage: make db-restore FILE=backups/forge_YYYYMMDD_HHMMSS.db" && exit 1)
