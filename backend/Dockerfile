@@ -15,15 +15,22 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY --from=mwader/static-ffmpeg:latest /ffmpeg  /usr/local/bin/ffmpeg
 COPY --from=mwader/static-ffmpeg:latest /ffprobe /usr/local/bin/ffprobe
 
+# Build tools required to compile flash-attn from source.
+# Debian Bookworm apt mirrors are stable — no hash mismatch issues.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential ninja-build \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install PyTorch + torchvision from the cu130 wheel index first so that
 # the subsequent requirements install does not overwrite them with a CPU build.
 RUN pip install --upgrade pip \
     && pip install torch torchvision \
        --index-url https://download.pytorch.org/whl/cu130
 
-# Install remaining Python dependencies (torch already satisfied, will be skipped)
+# Install remaining Python dependencies (torch already satisfied, will be skipped).
+# flash-attn is compiled here — MAX_JOBS limits parallel compilation to avoid OOM.
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN MAX_JOBS=4 pip install -r requirements.txt --no-build-isolation
 
 # Bake application code into the image (no dev bind-mounts in production)
 COPY . ./backend

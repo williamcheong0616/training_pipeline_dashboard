@@ -57,7 +57,7 @@ services:
     ports:
       # Bind to localhost only — the frontend container proxies all API calls
       # internally; expose externally only if you need direct API access.
-      - "127.0.0.1:${API_PORT:-8000}:8000"
+      - "127.0.0.1:${API_PORT:-8100}:8000"
     env_file: .env
     environment:
       - REDIS_URL=redis://redis:6379/0
