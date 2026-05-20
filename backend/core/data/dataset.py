@@ -15,7 +15,6 @@ def _load_raw(path_or_repo: str, format: str) -> List[Dict]:
         with open(p) as f:
             data = json.load(f) if p.suffix == ".json" else [json.loads(l) for l in f if l.strip()]
         return data
-    # HuggingFace Hub dataset
     ds = hf_load_dataset(path_or_repo, split="train")
     return [row for row in ds]
 
@@ -44,31 +43,37 @@ def build_dataset(
     tokenizer: PreTrainedTokenizer,
     max_length: int = 2048,
 ) -> Dataset:
+    """Return a Dataset with a 'text' column for SFTTrainer to tokenize internally.
+
+    Returning raw text (not pre-tokenized) avoids the shape mismatch that occurs when
+    SFTTrainer's processing_class looks for a 'text' column and finds none, producing
+    0-length input_ids.
+    """
     raw = _load_raw(path_or_repo, format)
     template = get_template(template_name)
 
     texts = []
     for row in raw:
         if format == "alpaca":
-            texts.append(_alpaca_to_text(row, template))
+            text = _alpaca_to_text(row, template)
         elif format == "sharegpt":
-            texts.append(_sharegpt_to_text(row, template))
+            text = _sharegpt_to_text(row, template)
         elif format == "plain_text":
-            texts.append(_plain_text(row))
+            text = _plain_text(row)
         else:
-            texts.append(_alpaca_to_text(row, template))
+            text = _alpaca_to_text(row, template)
+        if text and text.strip():
+            texts.append(text)
 
-    def tokenize(batch):
-        return tokenizer(
-            batch["text"],
-            truncation=True,
-            max_length=max_length,
-            padding=False,
+    if not texts:
+        raise ValueError(
+            f"Dataset at {path_or_repo!r} produced 0 non-empty samples after formatting."
         )
 
-    ds = Dataset.from_dict({"text": texts})
-    ds = ds.map(tokenize, batched=True, remove_columns=["text"])
-    return ds
+    # Tell SFTTrainer where to truncate — it reads model_max_length from the tokenizer.
+    tokenizer.model_max_length = max_length
+
+    return Dataset.from_dict({"text": texts})
 
 
 def build_plain_text_dataset(
@@ -76,13 +81,22 @@ def build_plain_text_dataset(
     tokenizer: PreTrainedTokenizer,
     max_length: int = 2048,
 ) -> Dataset:
-    """For unsupervised / continued pre-training — raw text only."""
+    """For unsupervised / continued pre-training — returns a tokenized dataset.
+
+    Used with plain Trainer + DataCollatorForLanguageModeling which expects input_ids.
+    """
     raw = _load_raw(path_or_repo, "plain_text")
-    texts = [_plain_text(r) for r in raw]
+    texts = [t for r in raw if (t := _plain_text(r)) and t.strip()]
+
+    if not texts:
+        raise ValueError(
+            f"Dataset at {path_or_repo!r} produced 0 non-empty plain-text samples."
+        )
 
     def tokenize(batch):
         return tokenizer(batch["text"], truncation=True, max_length=max_length, padding=False)
 
     ds = Dataset.from_dict({"text": texts})
     ds = ds.map(tokenize, batched=True, remove_columns=["text"])
+    ds = ds.filter(lambda x: len(x["input_ids"]) > 0)
     return ds
