@@ -34,11 +34,16 @@ class ORPOPipelineTrainer(BasePipelineTrainer):
         raw = json.loads(Path(cfg["dataset_path"]).read_text())
         dataset = Dataset.from_list(raw)
 
-        orpo_config = ORPOConfig(
-            **self._training_args(output_dir),
-            lambda_=float(cfg.get("lambda_", 0.1)),
-            max_length=int(cfg.get("max_seq_length", 2048)),
-        )
+        # lambda_ was renamed to beta in trl >= 0.12; try both to stay version-agnostic.
+        orpo_kwargs: dict = {"max_length": int(cfg.get("max_seq_length", 2048))}
+        import inspect, trl as _trl
+        _orpo_params = inspect.signature(_trl.ORPOConfig).parameters
+        if "beta" in _orpo_params:
+            orpo_kwargs["beta"] = float(cfg.get("lambda_", 0.1))
+        elif "lambda_" in _orpo_params:
+            orpo_kwargs["lambda_"] = float(cfg.get("lambda_", 0.1))
+
+        orpo_config = ORPOConfig(**self._training_args(output_dir), **orpo_kwargs)
 
         callbacks = [self.callback] if self.callback else []
         trainer = ORPOTrainer(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from trl import SFTTrainer, SFTConfig
+from transformers import Trainer, TrainingArguments, DataCollatorForLanguageModeling
 
 from backend.core.model.loader import load_model, load_tokenizer
 from backend.core.model.adapter import apply_lora
@@ -15,7 +15,6 @@ class SFTPipelineTrainer(BasePipelineTrainer):
         model_path = cfg["model_path"]
         peft_method = cfg.get("peft_method", "lora")
         output_dir = cfg.get("output_dir", f"outputs/job_{self.job_id}")
-        max_seq_length = int(cfg.get("max_seq_length", 2048))
 
         tokenizer = load_tokenizer(model_path)
         model = load_model(
@@ -37,31 +36,26 @@ class SFTPipelineTrainer(BasePipelineTrainer):
                 use_dora=(peft_method == "dora"),
             )
 
-        # build_dataset returns a Dataset with a 'text' column (formatted, not pre-tokenized)
-        # and sets tokenizer.model_max_length so SFTTrainer knows where to truncate.
-        # Passing dataset_text_field="text" tells SFTTrainer which column to tokenize —
-        # this avoids the 0-length input_ids shape error that occurs when SFTTrainer's
-        # processing_class can't find the text column.
         dataset = build_dataset(
             path_or_repo=cfg["dataset_path"],
             format=cfg.get("dataset_format", "alpaca"),
             template_name=cfg.get("template", "alpaca"),
             tokenizer=tokenizer,
-            max_length=max_seq_length,
+            max_length=int(cfg.get("max_seq_length", 2048)),
         )
 
-        sft_config = SFTConfig(
-            **self._training_args(output_dir),
-            packing=bool(cfg.get("packing", False)),
-        )
+        # Use plain transformers.Trainer instead of trl.SFTTrainer to avoid trl API
+        # instability (dataset_text_field, processing_class, max_seq_length have all
+        # moved between trl versions). DataCollatorForLanguageModeling(mlm=False)
+        # derives labels = input_ids with padding positions set to -100.
+        collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
         callbacks = [self.callback] if self.callback else []
-        trainer = SFTTrainer(
+        trainer = Trainer(
             model=model,
-            args=sft_config,
+            args=TrainingArguments(**self._training_args(output_dir)),
             train_dataset=dataset,
-            processing_class=tokenizer,
-            dataset_text_field="text",
+            data_collator=collator,
             callbacks=callbacks,
         )
         trainer.train()
