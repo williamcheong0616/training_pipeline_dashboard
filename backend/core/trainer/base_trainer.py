@@ -1,5 +1,6 @@
 from __future__ import annotations
 import abc
+import gc
 from datetime import datetime
 from typing import Any, Dict
 
@@ -47,6 +48,14 @@ class BasePipelineTrainer(abc.ABC):
 
     @abc.abstractmethod
     def train(self) -> None: ...
+
+    def offload_model(self, model) -> None:
+        """Delete model and free GPU memory after training."""
+        import torch
+        del model
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def _device_map(self) -> str:
         gpu_id = self.config.get("gpu_id", "auto")

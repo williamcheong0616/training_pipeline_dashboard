@@ -55,3 +55,4 @@ class ORPOPipelineTrainer(BasePipelineTrainer):
         )
         trainer.train()
         trainer.save_model(output_dir)
+        self.offload_model(model)

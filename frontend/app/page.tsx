@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { createJob, getModels, getDatasets, cancelJob, getSystemStats } from "@/lib/api";
+import { createJob, getJob, getModels, getDatasets, cancelJob, getSystemStats } from "@/lib/api";
 import { useMetricsStream } from "@/lib/sse";
 import MetricsPanel from "@/components/MetricsPanel";
 import Tooltip from "@/components/Tooltip";
@@ -126,12 +126,24 @@ export default function TrainPage() {
   const [activeJob, setActiveJob] = useState<Job | null>(null);
   const [logs, setLogs] = useState<string[]>(["[system] Ready. Configure parameters and press Start."]);
   const logRef = useRef<HTMLDivElement>(null);
-  const metrics = useMetricsStream(activeJob?.status === "running" ? activeJob.id : null);
+  const isActiveJob = !!activeJob && !["completed", "failed", "cancelled"].includes(activeJob.status);
+  const metrics = useMetricsStream(isActiveJob ? activeJob!.id : null);
 
   const { data: models = [] }   = useQuery({ queryKey: ["models"],   queryFn: getModels });
   const { data: datasets = [] } = useQuery({ queryKey: ["datasets"], queryFn: getDatasets });
   const selectedDataset = datasets.find((d) => d.id === Number(form.dataset_id)) ?? null;
   const { data: sysStats }      = useQuery({ queryKey: ["system"],   queryFn: getSystemStats, refetchInterval: 2000 });
+
+  // Poll active job status every 3 s so the status bar and SSE gate stay current
+  const { data: liveJob } = useQuery({
+    queryKey: ["job", activeJob?.id],
+    queryFn: () => getJob(activeJob!.id),
+    enabled: !!activeJob && activeJob.status !== "completed" && activeJob.status !== "failed" && activeJob.status !== "cancelled",
+    refetchInterval: 3000,
+  });
+  useEffect(() => {
+    if (liveJob) setActiveJob(liveJob);
+  }, [liveJob]);
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
