@@ -18,6 +18,7 @@ class DPOPipelineTrainer(BasePipelineTrainer):
         model_path = cfg["model_path"]
         peft_method = cfg.get("peft_method", "lora")
         output_dir = cfg.get("output_dir", f"outputs/job_{self.job_id}")
+        max_seq_length = int(cfg.get("max_seq_length", 2048))
 
         tokenizer = load_tokenizer(model_path)
         model = load_model(model_path, quantization=cfg.get("quantization"), device_map=self._device_map())
@@ -39,7 +40,8 @@ class DPOPipelineTrainer(BasePipelineTrainer):
             **self._training_args(output_dir),
             beta=float(cfg.get("beta", 0.1)),
             loss_type=cfg.get("loss_type", "sigmoid"),
-            max_length=int(cfg.get("max_seq_length", 2048)),
+            max_length=max_seq_length,
+            max_prompt_length=max_seq_length // 2,
         )
 
         callbacks = [self.callback] if self.callback else []

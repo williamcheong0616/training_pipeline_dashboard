@@ -15,6 +15,7 @@ class SFTPipelineTrainer(BasePipelineTrainer):
         model_path = cfg["model_path"]
         peft_method = cfg.get("peft_method", "lora")
         output_dir = cfg.get("output_dir", f"outputs/job_{self.job_id}")
+        max_seq_length = int(cfg.get("max_seq_length", 2048))
 
         tokenizer = load_tokenizer(model_path)
         model = load_model(
@@ -24,8 +25,6 @@ class SFTPipelineTrainer(BasePipelineTrainer):
             device_map=self._device_map(),
         )
 
-        # For quantized (QLoRA) models peft's kbit prepare must run before LoRA.
-        # It handles gradient checkpointing correctly for frozen quantized layers.
         model = self._prepare_model(model, gradient_checkpointing=True)
 
         if peft_method in ("lora", "qlora", "dora"):
@@ -38,17 +37,19 @@ class SFTPipelineTrainer(BasePipelineTrainer):
                 use_dora=(peft_method == "dora"),
             )
 
-        # Dataset is pre-tokenized here with the correct max_length.
+        # build_dataset returns a Dataset with a 'text' column (formatted, not pre-tokenized)
+        # and sets tokenizer.model_max_length so SFTTrainer knows where to truncate.
+        # Passing dataset_text_field="text" tells SFTTrainer which column to tokenize —
+        # this avoids the 0-length input_ids shape error that occurs when SFTTrainer's
+        # processing_class can't find the text column.
         dataset = build_dataset(
             path_or_repo=cfg["dataset_path"],
             format=cfg.get("dataset_format", "alpaca"),
             template_name=cfg.get("template", "alpaca"),
             tokenizer=tokenizer,
-            max_length=int(cfg.get("max_seq_length", 2048)),
+            max_length=max_seq_length,
         )
 
-        # max_seq_length was removed from SFTConfig in newer trl versions.
-        # The dataset is already tokenized so we don't need to pass it here.
         sft_config = SFTConfig(
             **self._training_args(output_dir),
             packing=bool(cfg.get("packing", False)),
@@ -60,6 +61,7 @@ class SFTPipelineTrainer(BasePipelineTrainer):
             args=sft_config,
             train_dataset=dataset,
             processing_class=tokenizer,
+            dataset_text_field="text",
             callbacks=callbacks,
         )
         trainer.train()
