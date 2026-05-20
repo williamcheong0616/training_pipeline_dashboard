@@ -36,11 +36,12 @@ function Badge({ status }: { status: JobStatus }) {
 
 // ── chart ────────────────────────────────────────────────────────────────────
 
-function MetricsChart({ jobId }: { jobId: number }) {
+function MetricsChart({ jobId, isRunning }: { jobId: number; isRunning: boolean }) {
   const { data: raw = [], isLoading } = useQuery({
     queryKey: ["job-metrics", jobId],
     queryFn: () => getJobMetrics(jobId),
-    staleTime: 30_000,
+    refetchInterval: isRunning ? 5000 : false,
+    staleTime: isRunning ? 0 : 30_000,
   });
 
   if (isLoading) return (
@@ -260,7 +261,7 @@ function DetailPanel({ job }: { job: Job }) {
 
       {/* Scrollable content */}
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
-        {tab === "metrics" && <MetricsChart jobId={job.id} />}
+        {tab === "metrics" && <MetricsChart jobId={job.id} isRunning={job.status === "running"} />}
         {tab === "config" && (
           <div style={{ marginBottom: 16 }}>
             <ConfigSummary cfg={job.config_json} />
@@ -283,8 +284,8 @@ type FilterType   = "all" | "llm" | "asr";
 
 export default function HistoryPage() {
   const qc = useQueryClient();
-  const { data: llmJobs = [] } = useQuery({ queryKey: ["jobs"],     queryFn: getJobs,    refetchInterval: 8000, staleTime: 6000 });
-  const { data: asrJobs = [] } = useQuery({ queryKey: ["asr-jobs"], queryFn: getASRJobs, refetchInterval: 8000, staleTime: 6000 });
+  const { data: llmJobs = [] } = useQuery({ queryKey: ["jobs"],     queryFn: getJobs,    refetchInterval: 5000, staleTime: 0 });
+  const { data: asrJobs = [] } = useQuery({ queryKey: ["asr-jobs"], queryFn: getASRJobs, refetchInterval: 5000, staleTime: 0 });
 
   const { mutate: doDelete } = useMutation({
     mutationFn: purgeJob,

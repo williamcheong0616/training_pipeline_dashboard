@@ -61,3 +61,4 @@ class SFTPipelineTrainer(BasePipelineTrainer):
         trainer.train()
         trainer.save_model(output_dir)
         tokenizer.save_pretrained(output_dir)
+        self.offload_model(model)
