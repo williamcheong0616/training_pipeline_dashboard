@@ -32,13 +32,22 @@ class PromptTemplate:
         return prompt
 
     def format_messages(self, messages: List[Dict]) -> str:
+        """Format a conversation list into a prompt string.
+
+        Supports both ShareGPT schema (from/value) and OpenAI schema (role/content).
+        """
         result = ""
-        system = next((m["value"] for m in messages if m.get("from") == "system"), "")
+        system = next(
+            (m.get("value", m.get("content", ""))
+             for m in messages
+             if m.get("from") == "system" or m.get("role") == "system"),
+            "",
+        )
         if system:
             result += self.system_prefix + system + self.system_suffix
         for msg in messages:
-            role = msg.get("from", "")
-            value = msg.get("value", "")
+            role = msg.get("from") or msg.get("role", "")
+            value = msg.get("value") or msg.get("content", "")
             if role in ("human", "user"):
                 result += self.human_prefix + value + self.human_suffix
             elif role in ("gpt", "assistant"):
