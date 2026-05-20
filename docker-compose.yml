@@ -88,7 +88,7 @@ services:
     restart: unless-stopped
     command: >
       celery -A backend.workers.celery_app worker
-      --loglevel=info --concurrency=1
+      --loglevel=info --concurrency=1 --pool=solo
       --logfile=/dev/stdout
     env_file: .env
     environment:
