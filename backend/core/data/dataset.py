@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 from datasets import Dataset, load_dataset as hf_load_dataset
 from transformers import PreTrainedTokenizer
@@ -9,7 +9,7 @@ from transformers import PreTrainedTokenizer
 from .template import get_template, PromptTemplate
 
 
-def _load_raw(path_or_repo: str, format: str) -> List[Dict]:
+def _load_raw(path_or_repo: str) -> List[Dict]:
     p = Path(path_or_repo)
     if p.exists():
         with open(p) as f:
@@ -43,13 +43,12 @@ def build_dataset(
     tokenizer: PreTrainedTokenizer,
     max_length: int = 2048,
 ) -> Dataset:
-    """Return a Dataset with a 'text' column for SFTTrainer to tokenize internally.
+    """Pre-tokenize a dataset for use with plain transformers.Trainer.
 
-    Returning raw text (not pre-tokenized) avoids the shape mismatch that occurs when
-    SFTTrainer's processing_class looks for a 'text' column and finds none, producing
-    0-length input_ids.
+    Returns a Dataset with input_ids and attention_mask columns.
+    DataCollatorForLanguageModeling(mlm=False) will add labels on-the-fly.
     """
-    raw = _load_raw(path_or_repo, format)
+    raw = _load_raw(path_or_repo)
     template = get_template(template_name)
 
     texts = []
@@ -67,13 +66,19 @@ def build_dataset(
 
     if not texts:
         raise ValueError(
-            f"Dataset at {path_or_repo!r} produced 0 non-empty samples after formatting."
+            f"Dataset at {path_or_repo!r} produced 0 non-empty samples with format={format!r}. "
+            "Check that the dataset keys match the expected format "
+            "(alpaca: instruction/output, sharegpt: conversations with role/content or from/value, "
+            "plain_text: text or content)."
         )
 
-    # Tell SFTTrainer where to truncate — it reads model_max_length from the tokenizer.
-    tokenizer.model_max_length = max_length
+    def tokenize(batch):
+        return tokenizer(batch["text"], truncation=True, max_length=max_length, padding=False)
 
-    return Dataset.from_dict({"text": texts})
+    ds = Dataset.from_dict({"text": texts})
+    ds = ds.map(tokenize, batched=True, remove_columns=["text"])
+    ds = ds.filter(lambda x: len(x["input_ids"]) > 0)
+    return ds
 
 
 def build_plain_text_dataset(
@@ -81,11 +86,8 @@ def build_plain_text_dataset(
     tokenizer: PreTrainedTokenizer,
     max_length: int = 2048,
 ) -> Dataset:
-    """For unsupervised / continued pre-training — returns a tokenized dataset.
-
-    Used with plain Trainer + DataCollatorForLanguageModeling which expects input_ids.
-    """
-    raw = _load_raw(path_or_repo, "plain_text")
+    """For unsupervised / continued pre-training."""
+    raw = _load_raw(path_or_repo)
     texts = [t for r in raw if (t := _plain_text(r)) and t.strip()]
 
     if not texts:
