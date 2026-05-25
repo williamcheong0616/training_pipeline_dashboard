@@ -39,7 +39,7 @@ export default function JobDetailPage() {
 
   const metrics = liveMetrics.length > 0 ? liveMetrics : historicalMetrics;
 
-  const { mutate: cancel } = useMutation({
+  const { mutate: cancel, isPending: cancelling } = useMutation({
     mutationFn: () => cancelJob(jobId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["job", jobId] }),
   });
@@ -92,14 +92,16 @@ export default function JobDetailPage() {
         </div>
 
         {job.error_msg && (
-          <div style={{ background: "var(--red-dim)", border: "1px solid var(--red)", borderRadius: 3, padding: "8px 10px", marginBottom: 10, fontFamily: "var(--mono)", fontSize: 11, color: "var(--red)" }}>
+          <div style={{ background: "var(--red-dim)", border: "1px solid var(--red)", borderRadius: 3, padding: "8px 10px", marginBottom: 10, fontFamily: "var(--mono)", fontSize: 11, color: "var(--red)", wordBreak: "break-word", maxHeight: 120, overflowY: "auto" }}>
             {job.error_msg}
           </div>
         )}
 
         <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
           {(job.status === "running" || job.status === "pending") && (
-            <button className="lf-btn lf-btn-danger" style={{ flex: 1 }} onClick={() => cancel()}>■ Abort</button>
+            <button className="lf-btn lf-btn-danger" style={{ flex: 1 }} disabled={cancelling} onClick={() => cancel()}>
+              {cancelling ? <><span className="lf-spin" /> Aborting…</> : "■ Abort"}
+            </button>
           )}
           {job.status === "completed" && (
             <button className="lf-btn lf-btn-success" style={{ flex: 1 }} disabled={exporting} onClick={() => doExport()}>
