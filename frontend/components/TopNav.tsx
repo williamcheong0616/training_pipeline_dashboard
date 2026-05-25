@@ -133,7 +133,7 @@ export default function TopNav() {
         <span style={{
           fontFamily: "var(--mono)", fontWeight: 600, fontSize: 12,
           color: "var(--text-hi)", letterSpacing: "0.04em",
-        }}>Forge</span>
+        }}>RojBot</span>
       </div>
 
       {/* Tabs */}
