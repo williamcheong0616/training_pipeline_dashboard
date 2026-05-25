@@ -40,7 +40,7 @@ export default function ModelsPage() {
     mutationFn: registerModel,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["models"] });
-      setManual({ name: "", hf_repo: "", template: "alpaca", architecture: "" });
+      setManual({ name: "", hf_repo: "", template: "alpaca", architecture: "", version: "" });
       setErrors((e) => { const n = { ...e }; delete n.register; return n; });
     },
     onError: (err) => {
