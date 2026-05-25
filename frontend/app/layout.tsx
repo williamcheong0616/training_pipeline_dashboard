@@ -5,7 +5,7 @@ import Providers from "@/components/Providers";
 import { ThemeProvider } from "@/components/ThemeProvider";
 
 export const metadata: Metadata = {
-  title: "Forge — LLM Fine-Tuning",
+  title: "RojBot — LLM Fine-Tuning",
   description: "LLM Fine-Tuning Platform",
 };
 
