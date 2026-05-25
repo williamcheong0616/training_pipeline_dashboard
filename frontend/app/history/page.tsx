@@ -10,13 +10,15 @@ import {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-function elapsed(started: string | null, finished: string | null) {
+function elapsed(started: string | null, finished: string | null, running = false) {
   if (!started) return "—";
   const ms = (finished ? new Date(finished) : new Date()).getTime() - new Date(started).getTime();
   const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
-  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  let dur: string;
+  if (s < 60) dur = `${s}s`;
+  else if (s < 3600) dur = `${Math.floor(s / 60)}m ${s % 60}s`;
+  else dur = `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  return running ? `${dur} (running)` : dur;
 }
 
 const fmtDate = fmtDateTime;
@@ -173,12 +175,17 @@ function RemarksEditor({ job }: { job: Job }) {
   useEffect(() => { setText(job.remarks ?? ""); setSaved(true); }, [job.id, job.remarks]);
   useEffect(() => { return () => { if (timerRef.current) clearTimeout(timerRef.current); }; }, []);
 
+  const [saveError, setSaveError] = useState(false);
   const { mutate: save } = useMutation({
     mutationFn: (r: string) => updateJobRemarks(job.id, r),
     onSuccess: () => {
       setSaved(true);
+      setSaveError(false);
       qc.invalidateQueries({ queryKey: ["jobs"] });
       qc.invalidateQueries({ queryKey: ["asr-jobs"] });
+    },
+    onError: () => {
+      setSaveError(true);
     },
   });
 
@@ -193,7 +200,9 @@ function RemarksEditor({ job }: { job: Job }) {
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
         <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Remarks</span>
-        {saved
+        {saveError
+          ? <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--red)" }}>save failed</span>
+          : saved
           ? <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--green)" }}>saved</span>
           : <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--amber)" }}>unsaved…</span>}
       </div>
@@ -232,7 +241,7 @@ function DetailPanel({ job }: { job: Job }) {
           {[
             ["method",   job.training_method],
             ["peft",     job.peft_method],
-            ["duration", elapsed(job.started_at, job.finished_at)],
+            ["duration", elapsed(job.started_at, job.finished_at, job.status === "running")],
             ["created",  fmtDate(job.created_at)],
           ].map(([k, v]) => (
             <span key={k} style={{ fontFamily: "var(--mono)", fontSize: 11 }}>
@@ -387,27 +396,29 @@ export default function HistoryPage() {
                   <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>#{j.id}</span>
                   <span style={{ fontFamily: "var(--mono)", fontSize: 12, fontWeight: 500, color: "var(--text-hi)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.name}</span>
                   <Badge status={j.status} />
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (confirm(`Delete job #${j.id} "${j.name}" permanently?`)) doDelete(j.id);
-                    }}
-                    title="Delete permanently"
-                    style={{
-                      background: "none", border: "none", cursor: "pointer",
-                      color: "var(--text-dim)", padding: "2px 4px", borderRadius: 2,
-                      fontFamily: "var(--mono)", fontSize: 12, lineHeight: 1, flexShrink: 0,
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.color = "var(--red)")}
-                    onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-dim)")}
-                  >✕</button>
+                  {j.status !== "running" && j.status !== "pending" && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm(`Delete job #${j.id} "${j.name}" permanently?`)) doDelete(j.id);
+                      }}
+                      title="Delete permanently"
+                      style={{
+                        background: "none", border: "none", cursor: "pointer",
+                        color: "var(--text-dim)", padding: "2px 4px", borderRadius: 2,
+                        fontFamily: "var(--mono)", fontSize: 12, lineHeight: 1, flexShrink: 0,
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.color = "var(--red)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-dim)")}
+                    >✕</button>
+                  )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: isASR ? "var(--accent)" : "var(--text-dim)", background: isASR ? "var(--accent-dim)" : undefined, padding: isASR ? "0 4px" : 0, borderRadius: 2 }}>
                     {isASR ? "ASR" : j.training_method}
                   </span>
                   <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>{j.peft_method}</span>
-                  <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", marginLeft: "auto" }}>{elapsed(j.started_at, j.finished_at)}</span>
+                  <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: j.status === "running" ? "var(--accent)" : "var(--text-dim)", marginLeft: "auto" }}>{elapsed(j.started_at, j.finished_at, j.status === "running")}</span>
                 </div>
                 {j.remarks && (
                   <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--amber)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
