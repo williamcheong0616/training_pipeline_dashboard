@@ -78,7 +78,7 @@ export interface ConversationDetail extends ConversationSummary {
 }
 export const getConversations = () => http.get<ConversationSummary[]>("/conversations").then((r) => r.data);
 export const getConversation = (id: number) => http.get<ConversationDetail>(`/conversations/${id}`).then((r) => r.data);
-export const createConversation = (body: { title?: string; model_path?: string; adapter_path?: string; system_prompt?: string }) =>
+export const createConversation = (body: { title?: string; model_path?: string; adapter_path?: string; system_prompt?: string; gen_params?: Record<string, unknown> }) =>
   http.post<ConversationSummary>("/conversations", body).then((r) => r.data);
 export const updateConversation = (id: number, body: { title?: string; system_prompt?: string; gen_params?: Record<string, unknown> }) =>
   http.patch<ConversationSummary>(`/conversations/${id}`, body).then((r) => r.data);
