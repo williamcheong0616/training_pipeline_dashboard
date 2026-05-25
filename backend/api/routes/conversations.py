@@ -21,11 +21,13 @@ class ConversationCreate(BaseModel):
     model_path: Optional[str] = None
     adapter_path: Optional[str] = None
     system_prompt: Optional[str] = None
+    gen_params: Optional[dict] = None
 
 
 class ConversationUpdate(BaseModel):
     title: Optional[str] = None
     system_prompt: Optional[str] = None
+    gen_params: Optional[dict] = None
 
 
 class MessageCreate(BaseModel):
@@ -58,6 +60,7 @@ class ConversationDetail(BaseModel):
     model_path: Optional[str]
     adapter_path: Optional[str]
     system_prompt: Optional[str]
+    gen_params: Optional[dict]
     created_at: datetime
     updated_at: datetime
     messages: List[MessageOut]
@@ -88,6 +91,7 @@ def create_conversation(body: ConversationCreate, db: Session = Depends(get_db))
         model_path=body.model_path,
         adapter_path=body.adapter_path,
         system_prompt=body.system_prompt,
+        gen_params=body.gen_params,
     )
     db.add(c)
     db.commit()
@@ -105,7 +109,8 @@ def get_conversation(conv_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Conversation not found")
     return ConversationDetail(
         id=c.id, title=c.title, model_path=c.model_path, adapter_path=c.adapter_path,
-        system_prompt=c.system_prompt, created_at=c.created_at, updated_at=c.updated_at,
+        system_prompt=c.system_prompt, gen_params=c.gen_params,
+        created_at=c.created_at, updated_at=c.updated_at,
         messages=[MessageOut(id=m.id, role=m.role, content=m.content, created_at=m.created_at) for m in c.messages],
     )
 
@@ -119,6 +124,8 @@ def update_conversation(conv_id: int, body: ConversationUpdate, db: Session = De
         c.title = body.title
     if body.system_prompt is not None:
         c.system_prompt = body.system_prompt
+    if body.gen_params is not None:
+        c.gen_params = body.gen_params
     c.updated_at = now_utc()
     db.commit()
     db.refresh(c)

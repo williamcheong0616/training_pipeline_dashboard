@@ -2,8 +2,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getJob, cancelJob, exportJob } from "@/lib/api";
+
 import { fmtDateTime } from "@/lib/datetime";
+import { getJob, cancelJob, exportJob, getJobMetrics } from "@/lib/api";
 import { useMetricsStream } from "@/lib/sse";
 import MetricsPanel from "@/components/MetricsPanel";
 import type { JobStatus } from "@/types";
@@ -29,7 +30,16 @@ export default function JobDetailPage() {
     refetchInterval: (q) => (q.state.data?.status === "running" ? 3000 : false),
   });
 
-  const metrics = useMetricsStream(job?.status === "running" ? jobId : null);
+  const liveMetrics = useMetricsStream(job?.status === "running" ? jobId : null);
+
+  const { data: historicalMetrics = [] } = useQuery({
+    queryKey: ["job-metrics", jobId],
+    queryFn: () => getJobMetrics(jobId),
+    enabled: !!job && job.status !== "running" && job.status !== "pending",
+    staleTime: Infinity,
+  });
+
+  const metrics = liveMetrics.length > 0 ? liveMetrics : historicalMetrics;
 
   const { mutate: cancel } = useMutation({
     mutationFn: () => cancelJob(jobId),
