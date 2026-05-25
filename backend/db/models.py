@@ -94,3 +94,29 @@ class Dataset(Base):
     created_at = Column(TZDateTime, default=now_utc)
 
     jobs = relationship("Job", back_populates="dataset")
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False, default="New Chat")
+    model_path = Column(String, nullable=True)
+    adapter_path = Column(String, nullable=True)
+    system_prompt = Column(Text, nullable=True)
+    created_at = Column(TZDateTime, default=now_utc)
+    updated_at = Column(TZDateTime, default=now_utc)
+
+    messages = relationship("ChatMessage", back_populates="conversation", cascade="all, delete-orphan", order_by="ChatMessage.id")
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False, index=True)
+    role = Column(String, nullable=False)   # user / assistant / system
+    content = Column(Text, nullable=False)
+    created_at = Column(TZDateTime, default=now_utc)
+
+    conversation = relationship("Conversation", back_populates="messages")

@@ -67,6 +67,25 @@ export const unloadChatModel = () => http.post("/chat/unload").then((r) => r.dat
 // System
 export const getSystemStats = () => http.get<SystemStats>("/system").then((r) => r.data);
 
+// Conversations
+export interface ConversationSummary {
+  id: number; title: string; model_path: string | null;
+  created_at: string; updated_at: string; message_count: number;
+}
+export interface ConversationMessage { id: number; role: string; content: string; created_at: string; }
+export interface ConversationDetail extends ConversationSummary {
+  adapter_path: string | null; system_prompt: string | null; messages: ConversationMessage[];
+}
+export const getConversations = () => http.get<ConversationSummary[]>("/conversations").then((r) => r.data);
+export const getConversation = (id: number) => http.get<ConversationDetail>(`/conversations/${id}`).then((r) => r.data);
+export const createConversation = (body: { title?: string; model_path?: string; adapter_path?: string; system_prompt?: string }) =>
+  http.post<ConversationSummary>("/conversations", body).then((r) => r.data);
+export const updateConversation = (id: number, body: { title?: string; system_prompt?: string }) =>
+  http.patch<ConversationSummary>(`/conversations/${id}`, body).then((r) => r.data);
+export const deleteConversation = (id: number) => http.delete(`/conversations/${id}`);
+export const addConversationMessage = (id: number, role: string, content: string) =>
+  http.post<ConversationMessage>(`/conversations/${id}/messages`, { role, content }).then((r) => r.data);
+
 // ASR
 export const getASRModels = () => http.get<{ id: string; params: string }[]>("/asr/models").then((r) => r.data);
 export const getASRDatasets = () => http.get<Dataset[]>("/asr/datasets").then((r) => r.data);

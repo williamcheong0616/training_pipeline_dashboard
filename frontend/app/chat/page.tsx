@@ -1,7 +1,11 @@
 "use client";
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getModels, loadChatModel, getChatStatus, unloadChatModel } from "@/lib/api";
+import {
+  getModels, loadChatModel, getChatStatus, unloadChatModel,
+  getConversations, getConversation, createConversation, updateConversation,
+  deleteConversation, addConversationMessage,
+} from "@/lib/api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -24,7 +28,6 @@ function MarkdownMessage({ content }: { content: string }) {
       remarkPlugins={[remarkGfm]}
       rehypePlugins={[rehypeHighlight]}
       components={{
-        // Inline code
         code({ className, children, ...props }) {
           const isBlock = className?.includes("language-");
           return isBlock ? (
@@ -37,52 +40,26 @@ function MarkdownMessage({ content }: { content: string }) {
             }} {...props}>{children}</code>
           );
         },
-        // Code block wrapper
         pre({ children }) {
-          return (
-            <pre style={{
-              margin: "8px 0", borderRadius: 4, overflow: "auto",
-              border: "1px solid var(--border)", fontSize: 11,
-            }}>{children}</pre>
-          );
+          return <pre style={{ margin: "8px 0", borderRadius: 4, overflow: "auto", border: "1px solid var(--border)", fontSize: 11 }}>{children}</pre>;
         },
-        // Tables
         table({ children }) {
-          return (
-            <div style={{ overflowX: "auto", margin: "8px 0" }}>
-              <table style={{ borderCollapse: "collapse", fontFamily: "var(--mono)", fontSize: 11, width: "100%" }}>{children}</table>
-            </div>
-          );
+          return <div style={{ overflowX: "auto", margin: "8px 0" }}><table style={{ borderCollapse: "collapse", fontFamily: "var(--mono)", fontSize: 11, width: "100%" }}>{children}</table></div>;
         },
-        th({ children }) {
-          return <th style={{ padding: "4px 10px", borderBottom: "1px solid var(--border-hi)", color: "var(--text-dim)", textAlign: "left", fontWeight: 600 }}>{children}</th>;
-        },
-        td({ children }) {
-          return <td style={{ padding: "4px 10px", borderBottom: "1px solid var(--border)", color: "var(--text)" }}>{children}</td>;
-        },
-        // Headings
+        th({ children }) { return <th style={{ padding: "4px 10px", borderBottom: "1px solid var(--border-hi)", color: "var(--text-dim)", textAlign: "left", fontWeight: 600 }}>{children}</th>; },
+        td({ children }) { return <td style={{ padding: "4px 10px", borderBottom: "1px solid var(--border)", color: "var(--text)" }}>{children}</td>; },
         h1({ children }) { return <div style={{ fontFamily: "var(--mono)", fontSize: 15, fontWeight: 700, color: "var(--text-hi)", margin: "10px 0 4px" }}>{children}</div>; },
         h2({ children }) { return <div style={{ fontFamily: "var(--mono)", fontSize: 13, fontWeight: 600, color: "var(--text-hi)", margin: "8px 0 4px" }}>{children}</div>; },
         h3({ children }) { return <div style={{ fontFamily: "var(--mono)", fontSize: 12, fontWeight: 600, color: "var(--text)", margin: "6px 0 3px" }}>{children}</div>; },
-        // Lists
         ul({ children }) { return <ul style={{ paddingLeft: 18, margin: "4px 0", fontSize: 12 }}>{children}</ul>; },
         ol({ children }) { return <ol style={{ paddingLeft: 18, margin: "4px 0", fontSize: 12 }}>{children}</ol>; },
         li({ children }) { return <li style={{ marginBottom: 2, color: "var(--text)" }}>{children}</li>; },
-        // Blockquote
-        blockquote({ children }) {
-          return <blockquote style={{ borderLeft: "3px solid var(--accent)", paddingLeft: 10, margin: "6px 0", color: "var(--text-dim)", fontStyle: "italic" }}>{children}</blockquote>;
-        },
-        // Paragraph
+        blockquote({ children }) { return <blockquote style={{ borderLeft: "3px solid var(--accent)", paddingLeft: 10, margin: "6px 0", color: "var(--text-dim)", fontStyle: "italic" }}>{children}</blockquote>; },
         p({ children }) { return <p style={{ margin: "4px 0", lineHeight: 1.7 }}>{children}</p>; },
-        // Horizontal rule
         hr() { return <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "8px 0" }} />; },
-        // Bold / italic
         strong({ children }) { return <strong style={{ color: "var(--text-hi)", fontWeight: 600 }}>{children}</strong>; },
         em({ children }) { return <em style={{ color: "var(--text-dim)" }}>{children}</em>; },
-        // Links
-        a({ href, children }) {
-          return <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", textDecoration: "underline" }}>{children}</a>;
-        },
+        a({ href, children }) { return <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", textDecoration: "underline" }}>{children}</a>; },
       }}
     >
       {content}
@@ -100,57 +77,63 @@ function StatusDot({ status }: { status: string }) {
   );
 }
 
-const STORAGE_KEY = "rojbot-chat-state";
-
-function loadPersistedState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as {
-      messages: Message[];
-      systemPrompt: string;
-      genParams: { max_new_tokens: number; temperature: number; top_p: number; top_k: number; repetition_penalty: number };
-      loadForm: { model_path: string; adapter_path: string; quantization: string };
-    };
-  } catch {
-    return null;
-  }
+function timeAgo(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }
 
 export default function ChatPage() {
   const qc = useQueryClient();
   const { data: models = [] } = useQuery({ queryKey: ["models"], queryFn: getModels });
   const { data: chatStatus, refetch: refetchStatus } = useQuery({
-    queryKey: ["chat-status"],
-    queryFn: getChatStatus,
-    refetchInterval: 2000,
+    queryKey: ["chat-status"], queryFn: getChatStatus, refetchInterval: 2000,
+  });
+  const { data: conversations = [], refetch: refetchConvs } = useQuery({
+    queryKey: ["conversations"], queryFn: getConversations,
   });
 
-  const persisted = useRef(loadPersistedState());
-
-  const [loadForm, setLoadForm] = useState(persisted.current?.loadForm ?? { model_path: "", adapter_path: "", quantization: "none" });
-  const [genParams, setGenParams] = useState(persisted.current?.genParams ?? { max_new_tokens: 512, temperature: 0.7, top_p: 0.9, top_k: 50, repetition_penalty: 1.1 });
-  const [systemPrompt, setSystemPrompt] = useState(persisted.current?.systemPrompt ?? "You are a helpful assistant.");
-  const [messages, setMessages] = useState<Message[]>(persisted.current?.messages ?? []);
+  const [activeConvId, setActiveConvId] = useState<number | null>(null);
+  const [loadForm, setLoadForm] = useState({ model_path: "", adapter_path: "", quantization: "none" });
+  const [genParams, setGenParams] = useState({ max_new_tokens: 512, temperature: 0.7, top_p: 0.9, top_k: 50, repetition_penalty: 1.1 });
+  const [systemPrompt, setSystemPrompt] = useState("You are a helpful assistant.");
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [generating, setGenerating] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Persist state to localStorage whenever it changes
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ messages, systemPrompt, genParams, loadForm }));
-    } catch {}
-  }, [messages, systemPrompt, genParams, loadForm]);
-
-  useEffect(() => {
-    return () => { abortRef.current?.abort(); };
-  }, []);
-
+  useEffect(() => { return () => { abortRef.current?.abort(); }; }, []);
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
   }, [messages]);
+
+  // Load conversation from DB
+  const loadConv = useCallback(async (convId: number) => {
+    const conv = await getConversation(convId);
+    setActiveConvId(convId);
+    setMessages(conv.messages.filter((m) => m.role !== "system") as Message[]);
+    if (conv.system_prompt) setSystemPrompt(conv.system_prompt);
+    if (conv.model_path) setLoadForm((p) => ({ ...p, model_path: conv.model_path ?? "", adapter_path: conv.adapter_path ?? "" }));
+  }, []);
+
+  // Auto-load most recent conversation on mount
+  useEffect(() => {
+    if (conversations.length > 0 && activeConvId === null) {
+      loadConv(conversations[0].id);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversations.length]);
+
+  const startNewChat = () => {
+    setActiveConvId(null);
+    setMessages([]);
+    setInput("");
+  };
 
   const { mutate: doLoad, isPending: isLoading } = useMutation({
     mutationFn: () => loadChatModel({
@@ -166,23 +149,50 @@ export default function ChatPage() {
     onSuccess: () => refetchStatus(),
   });
 
+  const { mutate: doDelete } = useMutation({
+    mutationFn: (id: number) => deleteConversation(id),
+    onSuccess: (_data, deletedId) => {
+      refetchConvs();
+      if (activeConvId === deletedId) startNewChat();
+    },
+  });
+
   const isReady = chatStatus?.status === "ready";
 
   const sendMessage = async () => {
     if (!input.trim() || !isReady || generating) return;
 
-    const userMsg: Message = { role: "user", content: input.trim() };
+    const userText = input.trim();
+    const userMsg: Message = { role: "user", content: userText };
+    setMessages((p) => [...p, userMsg, { role: "assistant", content: "" }]);
+    setInput("");
+    setGenerating(true);
+
+    // Create conversation on first message
+    let convId = activeConvId;
+    if (!convId) {
+      const title = userText.slice(0, 60) + (userText.length > 60 ? "…" : "");
+      const conv = await createConversation({
+        title,
+        model_path: loadForm.model_path || undefined,
+        adapter_path: loadForm.adapter_path || undefined,
+        system_prompt: systemPrompt || undefined,
+      });
+      convId = conv.id;
+      setActiveConvId(convId);
+      refetchConvs();
+    }
+
+    // Persist user message
+    await addConversationMessage(convId, "user", userText);
+
     const allMsgs: Message[] = [
       ...(systemPrompt ? [{ role: "system" as const, content: systemPrompt }] : []),
       ...messages,
       userMsg,
     ];
-    setMessages((p) => [...p, userMsg, { role: "assistant", content: "" }]);
-    setInput("");
-    setGenerating(true);
 
     const body = JSON.stringify({ messages: allMsgs, ...genParams });
-
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -195,15 +205,19 @@ export default function ChatPage() {
 
     if (!resp.ok || !resp.body) {
       const errText = resp.ok ? "No response body" : (await resp.text().catch(() => `HTTP ${resp.status}`));
-      setMessages((p) => [...p, { role: "assistant", content: `[Error: ${errText}]` }]);
+      const errContent = `[Error: ${errText}]`;
+      setMessages((p) => [...p.slice(0, -1), { role: "assistant", content: errContent }]);
+      await addConversationMessage(convId, "assistant", errContent);
       setGenerating(false);
       abortRef.current = null;
+      refetchConvs();
       return;
     }
 
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let assistantContent = "";
 
     try {
       while (true) {
@@ -216,13 +230,17 @@ export default function ChatPage() {
           if (line.startsWith("data: ")) {
             try {
               const { token } = JSON.parse(line.slice(6));
-              if (token === "__done__") { setGenerating(false); abortRef.current = null; return; }
+              if (token === "__done__") {
+                await addConversationMessage(convId!, "assistant", assistantContent);
+                refetchConvs();
+                setGenerating(false);
+                abortRef.current = null;
+                return;
+              }
+              assistantContent += token;
               setMessages((p) => {
                 const updated = [...p];
-                updated[updated.length - 1] = {
-                  ...updated[updated.length - 1],
-                  content: updated[updated.length - 1].content + token,
-                };
+                updated[updated.length - 1] = { ...updated[updated.length - 1], content: assistantContent };
                 return updated;
               });
             } catch { /* ignore malformed SSE frame */ }
@@ -230,7 +248,12 @@ export default function ChatPage() {
         }
       }
     } catch {
-      // AbortError or network error — leave partial content in place
+      // AbortError — save whatever was generated
+    }
+
+    if (assistantContent) {
+      await addConversationMessage(convId!, "assistant", assistantContent);
+      refetchConvs();
     }
     setGenerating(false);
     abortRef.current = null;
@@ -245,11 +268,58 @@ export default function ChatPage() {
 
       {/* LEFT — config */}
       <div style={{ borderRight: "1px solid var(--border)", overflowY: "auto", padding: "10px 12px" }}>
+
+        {/* Header row */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
           <span style={{ fontFamily: "var(--mono)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--accent)", background: "var(--accent-dim)", padding: "2px 7px", borderRadius: 2 }}>Chat</span>
           <StatusDot status={chatStatus?.status ?? "unloaded"} />
         </div>
 
+        {/* Conversations */}
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Sessions</span>
+            <button className="lf-btn lf-btn-ghost" style={{ height: 20, fontSize: 10, padding: "0 8px" }} onClick={startNewChat}>
+              + New
+            </button>
+          </div>
+          <div style={{ maxHeight: 180, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
+            {conversations.length === 0 && (
+              <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", padding: "6px 0" }}>No sessions yet</div>
+            )}
+            {conversations.map((c) => (
+              <div key={c.id}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  padding: "5px 7px", borderRadius: 3, cursor: "pointer",
+                  background: activeConvId === c.id ? "var(--bg-hover)" : "transparent",
+                  border: `1px solid ${activeConvId === c.id ? "var(--border-hi)" : "transparent"}`,
+                  transition: "background 0.1s",
+                }}
+                onClick={() => loadConv(c.id)}
+              >
+                <div style={{ flex: 1, overflow: "hidden" }}>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: activeConvId === c.id ? "var(--text-hi)" : "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {c.title}
+                  </div>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", marginTop: 1 }}>
+                    {c.message_count} msgs · {timeAgo(c.updated_at)}
+                  </div>
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${c.title}"?`)) doDelete(c.id); }}
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-dim)", fontSize: 11, padding: "1px 3px", borderRadius: 2, flexShrink: 0, lineHeight: 1 }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = "var(--red)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-dim)")}
+                >✕</button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ borderTop: "1px solid var(--border)", marginBottom: 8 }} />
+
+        {/* Model */}
         <Section title="Model" />
         <div style={{ marginBottom: 8 }}>
           <label className="lf-label">model</label>
@@ -281,11 +351,7 @@ export default function ChatPage() {
             {chatStatus?.status === "loading" ? <><span className="lf-spin" /> Loading…</> : "Load Model"}
           </button>
           <button className="lf-btn lf-btn-danger" disabled={!isReady} style={{ padding: "0 12px" }}
-            onClick={() => {
-              if (window.confirm("Unload the model? This clears GPU memory — you will need to reload to chat again.")) {
-                doUnload();
-              }
-            }}>
+            onClick={() => { if (window.confirm("Unload the model? This clears GPU memory.")) doUnload(); }}>
             Unload
           </button>
         </div>
@@ -333,10 +399,12 @@ export default function ChatPage() {
         {/* Toolbar */}
         <div style={{ borderBottom: "1px solid var(--border)", padding: "0 14px", height: 32, display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--bg-panel)", flexShrink: 0 }}>
           <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>
-            {messages.filter((m) => m.role !== "system").length} messages
+            {activeConvId
+              ? `#${activeConvId} · ${messages.filter((m) => m.role !== "system").length} messages`
+              : "new session"}
           </span>
           <button className="lf-btn lf-btn-ghost" style={{ height: 22, fontSize: 10, padding: "0 8px" }}
-            onClick={() => { setMessages([]); try { localStorage.removeItem(STORAGE_KEY); } catch {} }}>Clear</button>
+            onClick={startNewChat}>New Chat</button>
         </div>
 
         {/* Messages */}
@@ -349,11 +417,7 @@ export default function ChatPage() {
           {messages.map((msg, i) => (
             <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
               <div style={{
-                maxWidth: "80%",
-                padding: "8px 12px",
-                borderRadius: 4,
-                fontSize: 12,
-                lineHeight: 1.7,
+                maxWidth: "80%", padding: "8px 12px", borderRadius: 4, fontSize: 12, lineHeight: 1.7,
                 background: msg.role === "user" ? "var(--accent-dim)" : "var(--bg-panel)",
                 border: `1px solid ${msg.role === "user" ? "var(--accent)" : "var(--border)"}`,
                 color: msg.role === "user" ? "var(--accent)" : "var(--text)",
@@ -366,16 +430,12 @@ export default function ChatPage() {
                 {msg.role === "assistant" ? (
                   <>
                     <MarkdownMessage content={msg.content} />
-                    {generating && i === messages.length - 1 && (
-                      <span className="lf-cursor" style={{ marginLeft: 2 }}>█</span>
-                    )}
+                    {generating && i === messages.length - 1 && <span className="lf-cursor" style={{ marginLeft: 2 }}>█</span>}
                   </>
                 ) : (
                   <>
                     {msg.content}
-                    {generating && i === messages.length - 1 && (
-                      <span className="lf-cursor" style={{ marginLeft: 2 }}>█</span>
-                    )}
+                    {generating && i === messages.length - 1 && <span className="lf-cursor" style={{ marginLeft: 2 }}>█</span>}
                   </>
                 )}
               </div>
