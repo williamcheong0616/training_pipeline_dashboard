@@ -100,6 +100,23 @@ function StatusDot({ status }: { status: string }) {
   );
 }
 
+const STORAGE_KEY = "rojbot-chat-state";
+
+function loadPersistedState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as {
+      messages: Message[];
+      systemPrompt: string;
+      genParams: { max_new_tokens: number; temperature: number; top_p: number; top_k: number; repetition_penalty: number };
+      loadForm: { model_path: string; adapter_path: string; quantization: string };
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default function ChatPage() {
   const qc = useQueryClient();
   const { data: models = [] } = useQuery({ queryKey: ["models"], queryFn: getModels });
@@ -109,14 +126,23 @@ export default function ChatPage() {
     refetchInterval: 2000,
   });
 
-  const [loadForm, setLoadForm] = useState({ model_path: "", adapter_path: "", quantization: "none" });
-  const [genParams, setGenParams] = useState({ max_new_tokens: 512, temperature: 0.7, top_p: 0.9, top_k: 50, repetition_penalty: 1.1 });
-  const [systemPrompt, setSystemPrompt] = useState("You are a helpful assistant.");
-  const [messages, setMessages] = useState<Message[]>([]);
+  const persisted = useRef(loadPersistedState());
+
+  const [loadForm, setLoadForm] = useState(persisted.current?.loadForm ?? { model_path: "", adapter_path: "", quantization: "none" });
+  const [genParams, setGenParams] = useState(persisted.current?.genParams ?? { max_new_tokens: 512, temperature: 0.7, top_p: 0.9, top_k: 50, repetition_penalty: 1.1 });
+  const [systemPrompt, setSystemPrompt] = useState(persisted.current?.systemPrompt ?? "You are a helpful assistant.");
+  const [messages, setMessages] = useState<Message[]>(persisted.current?.messages ?? []);
   const [input, setInput] = useState("");
   const [generating, setGenerating] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Persist state to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ messages, systemPrompt, genParams, loadForm }));
+    } catch {}
+  }, [messages, systemPrompt, genParams, loadForm]);
 
   useEffect(() => {
     return () => { abortRef.current?.abort(); };
@@ -310,7 +336,7 @@ export default function ChatPage() {
             {messages.filter((m) => m.role !== "system").length} messages
           </span>
           <button className="lf-btn lf-btn-ghost" style={{ height: 22, fontSize: 10, padding: "0 8px" }}
-            onClick={() => setMessages([])}>Clear</button>
+            onClick={() => { setMessages([]); try { localStorage.removeItem(STORAGE_KEY); } catch {} }}>Clear</button>
         </div>
 
         {/* Messages */}
