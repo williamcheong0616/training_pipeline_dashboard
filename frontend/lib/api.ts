@@ -19,7 +19,7 @@ export const updateJobRemarks = (id: number, remarks: string) =>
   http.patch<Job>(`/jobs/${id}/remarks`, { remarks }).then((r) => r.data);
 export const purgeJob = (id: number) => http.delete(`/jobs/${id}/purge`);
 export const getJobMetrics = (id: number) =>
-  http.get<{ id: number; step: number; epoch: number | null; loss: number | null; eval_loss: number | null; learning_rate: number | null; reward: number | null; grad_norm: number | null }[]>(`/jobs/${id}/metrics/all`).then((r) => r.data);
+  http.get<import("@/types").TrainingMetric[]>(`/jobs/${id}/metrics/all`).then((r) => r.data);
 
 // Models
 export const getModels = () => http.get<ModelEntry[]>("/models").then((r) => r.data);
