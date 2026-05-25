@@ -22,6 +22,7 @@ class ModelCreate(BaseModel):
     hf_repo: str
     architecture: Optional[str] = None
     template: str = "alpaca"
+    version: Optional[str] = None
 
 
 class ModelResponse(BaseModel):
@@ -33,6 +34,7 @@ class ModelResponse(BaseModel):
     template: str
     is_downloaded: str
     downloaded_at: Optional[datetime]
+    version: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -74,6 +76,7 @@ def register_model(body: ModelCreate, db: Session = Depends(get_db)):
         hf_repo=body.hf_repo,
         architecture=body.architecture,
         template=body.template,
+        version=body.version,
         local_path=os.path.join(MODELS_DIR, body.hf_repo.replace("/", "--")),
     )
     db.add(entry)

@@ -105,6 +105,19 @@ type FormState = {
   resume_from_checkpoint: string;
 };
 
+function genOutputDir(name: string): string {
+  const now = new Date();
+  const dd  = String(now.getDate()).padStart(2, "0");
+  const mm  = String(now.getMonth() + 1).padStart(2, "0");
+  const yy  = String(now.getFullYear()).slice(2);
+  const hh  = String(now.getHours() % 12 || 12);
+  const min = String(now.getMinutes()).padStart(2, "0");
+  const ap  = now.getHours() < 12 ? "am" : "pm";
+  const ts  = `${dd}${mm}${yy}_${hh}${min}${ap}`;
+  const slug = name.trim().replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40) || "run";
+  return `./outputs/${slug}_${ts}`;
+}
+
 const DEFAULT: FormState = {
   name: "", model_id: "", template: "alpaca", quantization: "none", gpu_id: "auto",
   flash_attention: false, training_method: "sft", peft_method: "lora",
@@ -114,7 +127,7 @@ const DEFAULT: FormState = {
   learning_rate: 2e-4, num_epochs: 3, batch_size: 4,
   gradient_accumulation_steps: 4, lr_scheduler: "cosine", warmup_ratio: 0.05,
   max_grad_norm: 1.0, logging_steps: 10, save_steps: 500, seed: 42,
-  output_dir: "./outputs/run",
+  output_dir: genOutputDir("run"),
   bf16: true, fp16: false, gradient_checkpointing: true,
   dataloader_num_workers: 4, resume_from_checkpoint: "",
 };
@@ -144,6 +157,13 @@ export default function TrainPage() {
   useEffect(() => {
     if (liveJob) setActiveJob(liveJob);
   }, [liveJob]);
+
+  // Auto-update output_dir when name changes, unless user manually edited it
+  const dirTouchedRef = useRef(false);
+  const handleNameChange = (v: string) => {
+    set("name", v);
+    if (!dirTouchedRef.current) set("output_dir", genOutputDir(v));
+  };
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
@@ -252,7 +272,7 @@ export default function TrainPage() {
 
         <div className="lf-row lf-row-2" style={{ marginBottom: 8 }}>
           <Field label="run name" tooltip="A label for this training run. Appears in the job list and log output. Does not affect training results.">
-            <input className="lf-input" value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="my-sft-run" />
+            <input className="lf-input" value={form.name} onChange={(e) => handleNameChange(e.target.value)} placeholder="my-sft-run" />
           </Field>
           <Field label="base model" tooltip="The pre-trained model to fine-tune. Must be downloaded first via the Models page. The model's architecture determines which templates and modules are available.">
             <select className="lf-input lf-select" value={form.model_id} onChange={(e) => set("model_id", e.target.value)}>
@@ -434,7 +454,7 @@ export default function TrainPage() {
         </div>
 
         <Field label="output dir" tooltip="Directory where checkpoints and the final merged/adapter weights are saved after training. Use a unique path per run to avoid overwriting previous results.">
-          <input className="lf-input" value={form.output_dir} onChange={(e) => set("output_dir", e.target.value)} />
+          <input className="lf-input" value={form.output_dir} onChange={(e) => { dirTouchedRef.current = true; set("output_dir", e.target.value); }} />
         </Field>
 
         <Section title="Advanced" tooltip="Precision and memory optimization settings. Defaults work for most cases." />

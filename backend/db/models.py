@@ -77,6 +77,7 @@ class ModelEntry(Base):
     template = Column(String, default="alpaca")
     is_downloaded = Column(String, default="false")
     downloaded_at = Column(TZDateTime, nullable=True)
+    version = Column(String, nullable=True)
 
     jobs = relationship("Job", back_populates="model")
 

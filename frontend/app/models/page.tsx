@@ -19,7 +19,7 @@ export default function ModelsPage() {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<HFSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
-  const [manual, setManual] = useState({ name: "", hf_repo: "", template: "alpaca", architecture: "" });
+  const [manual, setManual] = useState({ name: "", hf_repo: "", template: "alpaca", architecture: "", version: "" });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [downloadingIds, setDownloadingIds] = useState<Set<number>>(new Set());
 
@@ -86,7 +86,7 @@ export default function ModelsPage() {
             <div style={{ padding: 20, fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-dim)", textAlign: "center" }}>loading…</div>
           ) : (
             <table className="lf-table">
-              <thead><tr><th>Name</th><th>Repo</th><th>Template</th><th>Status</th><th /></tr></thead>
+              <thead><tr><th>Name</th><th>Repo</th><th>Template</th><th>Version</th><th>Status</th><th /></tr></thead>
               <tbody>
                 {models.map((m) => {
                   const ready = m.is_downloaded === "true";
@@ -96,6 +96,7 @@ export default function ModelsPage() {
                       <td style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-hi)" }}>{m.name}</td>
                       <td style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>{m.hf_repo}</td>
                       <td style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>{m.template}</td>
+                      <td style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--accent)" }}>{m.version ?? "—"}</td>
                       <td>
                         <span className={`lf-badge ${ready ? "lf-badge-done" : downloading ? "lf-badge-running" : "lf-badge-pending"}`}>
                           {ready ? "ready" : downloading ? "downloading…" : "not downloaded"}
@@ -117,7 +118,7 @@ export default function ModelsPage() {
                   );
                 })}
                 {models.length === 0 && (
-                  <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--text-dim)", fontFamily: "var(--mono)", fontSize: 11, padding: 24 }}>
+                  <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--text-dim)", fontFamily: "var(--mono)", fontSize: 11, padding: 24 }}>
                     No models. Add from HF Hub or manually.
                   </td></tr>
                 )}
@@ -135,10 +136,11 @@ export default function ModelsPage() {
             </div>
           )}
           <div className="lf-row lf-row-2" style={{ marginBottom: 8 }}>
-            {(["name","hf_repo","template","architecture"] as const).map((k) => (
+            {(["name","hf_repo","template","architecture","version"] as const).map((k) => (
               <div key={k}>
                 <label className="lf-label">{k.replace("_"," ")}</label>
-                <input className="lf-input" value={manual[k]} onChange={(e) => setManual((p) => ({ ...p, [k]: e.target.value }))} placeholder={k === "hf_repo" ? "org/model-name" : ""} />
+                <input className="lf-input" value={manual[k]} onChange={(e) => setManual((p) => ({ ...p, [k]: e.target.value }))}
+                  placeholder={k === "hf_repo" ? "org/model-name" : k === "version" ? "e.g. v1.0, 2024-06 (optional)" : ""} />
               </div>
             ))}
           </div>
