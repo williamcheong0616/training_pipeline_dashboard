@@ -5,6 +5,7 @@ import {
   getModels, loadChatModel, getChatStatus, unloadChatModel,
   getConversations, getConversation, createConversation, updateConversation,
   deleteConversation, addConversationMessage,
+  getPromptProfiles, createPromptProfile, deletePromptProfile,
 } from "@/lib/api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -14,9 +15,16 @@ import "highlight.js/styles/github-dark.css";
 const QUANT_OPTIONS = ["none", "4bit", "8bit"] as const;
 
 type Message = { role: "user" | "assistant" | "system"; content: string };
+type GenParams = { max_new_tokens: number; temperature: number; top_p: number; top_k: number; repetition_penalty: number };
+const DEFAULT_GEN_PARAMS: GenParams = { max_new_tokens: 512, temperature: 0.7, top_p: 0.9, top_k: 50, repetition_penalty: 1.1 };
 
-function Section({ title }: { title: string }) {
-  return <div className="lf-section" style={{ marginTop: 12 }}>{title}</div>;
+function Section({ title, right }: { title: string; right?: React.ReactNode }) {
+  return (
+    <div className="lf-section" style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <span>{title}</span>
+      {right}
+    </div>
+  );
 }
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><label className="lf-label">{label}</label>{children}</div>;
@@ -33,19 +41,11 @@ function MarkdownMessage({ content }: { content: string }) {
           return isBlock ? (
             <code className={className} {...props}>{children}</code>
           ) : (
-            <code style={{
-              fontFamily: "var(--mono)", fontSize: 11,
-              background: "var(--bg-input)", border: "1px solid var(--border)",
-              borderRadius: 2, padding: "1px 5px", color: "var(--green)",
-            }} {...props}>{children}</code>
+            <code style={{ fontFamily: "var(--mono)", fontSize: 11, background: "var(--bg-input)", border: "1px solid var(--border)", borderRadius: 2, padding: "1px 5px", color: "var(--green)" }} {...props}>{children}</code>
           );
         },
-        pre({ children }) {
-          return <pre style={{ margin: "8px 0", borderRadius: 4, overflow: "auto", border: "1px solid var(--border)", fontSize: 11 }}>{children}</pre>;
-        },
-        table({ children }) {
-          return <div style={{ overflowX: "auto", margin: "8px 0" }}><table style={{ borderCollapse: "collapse", fontFamily: "var(--mono)", fontSize: 11, width: "100%" }}>{children}</table></div>;
-        },
+        pre({ children }) { return <pre style={{ margin: "8px 0", borderRadius: 4, overflow: "auto", border: "1px solid var(--border)", fontSize: 11 }}>{children}</pre>; },
+        table({ children }) { return <div style={{ overflowX: "auto", margin: "8px 0" }}><table style={{ borderCollapse: "collapse", fontFamily: "var(--mono)", fontSize: 11, width: "100%" }}>{children}</table></div>; },
         th({ children }) { return <th style={{ padding: "4px 10px", borderBottom: "1px solid var(--border-hi)", color: "var(--text-dim)", textAlign: "left", fontWeight: 600 }}>{children}</th>; },
         td({ children }) { return <td style={{ padding: "4px 10px", borderBottom: "1px solid var(--border)", color: "var(--text)" }}>{children}</td>; },
         h1({ children }) { return <div style={{ fontFamily: "var(--mono)", fontSize: 15, fontWeight: 700, color: "var(--text-hi)", margin: "10px 0 4px" }}>{children}</div>; },
@@ -96,29 +96,53 @@ export default function ChatPage() {
   const { data: conversations = [], refetch: refetchConvs } = useQuery({
     queryKey: ["conversations"], queryFn: getConversations,
   });
+  const { data: profiles = [], refetch: refetchProfiles } = useQuery({
+    queryKey: ["prompt-profiles"], queryFn: getPromptProfiles,
+  });
 
   const [activeConvId, setActiveConvId] = useState<number | null>(null);
   const [loadForm, setLoadForm] = useState({ model_path: "", adapter_path: "", quantization: "none" });
-  const [genParams, setGenParams] = useState({ max_new_tokens: 512, temperature: 0.7, top_p: 0.9, top_k: 50, repetition_penalty: 1.1 });
+  const [genParams, setGenParams] = useState<GenParams>(DEFAULT_GEN_PARAMS);
   const [systemPrompt, setSystemPrompt] = useState("You are a helpful assistant.");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [generating, setGenerating] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(true);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileName, setProfileName] = useState("");
   const chatRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { return () => { abortRef.current?.abort(); }; }, []);
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
   }, [messages]);
 
-  // Load conversation from DB
+  // Debounce-save system prompt + gen params to DB when conversation is active
+  useEffect(() => {
+    if (!activeConvId) return;
+    setSettingsSaved(false);
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      await updateConversation(activeConvId, {
+        system_prompt: systemPrompt,
+        gen_params: genParams as unknown as Record<string, unknown>,
+      });
+      setSettingsSaved(true);
+    }, 1000);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [systemPrompt, genParams, activeConvId]);
+
   const loadConv = useCallback(async (convId: number) => {
     const conv = await getConversation(convId);
     setActiveConvId(convId);
     setMessages(conv.messages.filter((m) => m.role !== "system") as Message[]);
-    if (conv.system_prompt) setSystemPrompt(conv.system_prompt);
+    if (conv.system_prompt != null) setSystemPrompt(conv.system_prompt);
+    if (conv.gen_params) setGenParams(conv.gen_params as unknown as GenParams);
     if (conv.model_path) setLoadForm((p) => ({ ...p, model_path: conv.model_path ?? "", adapter_path: conv.adapter_path ?? "" }));
+    setSettingsSaved(true);
   }, []);
 
   // Auto-load most recent conversation on mount
@@ -133,6 +157,7 @@ export default function ChatPage() {
     setActiveConvId(null);
     setMessages([]);
     setInput("");
+    setSettingsSaved(true);
   };
 
   const { mutate: doLoad, isPending: isLoading } = useMutation({
@@ -149,7 +174,7 @@ export default function ChatPage() {
     onSuccess: () => refetchStatus(),
   });
 
-  const { mutate: doDelete } = useMutation({
+  const { mutate: doDeleteConv } = useMutation({
     mutationFn: (id: number) => deleteConversation(id),
     onSuccess: (_data, deletedId) => {
       refetchConvs();
@@ -157,7 +182,32 @@ export default function ChatPage() {
     },
   });
 
+  const { mutate: doDeleteProfile } = useMutation({
+    mutationFn: (id: number) => deletePromptProfile(id),
+    onSuccess: () => refetchProfiles(),
+  });
+
+  const handleSaveProfile = async () => {
+    if (!profileName.trim()) return;
+    await createPromptProfile({
+      name: profileName.trim(),
+      system_prompt: systemPrompt,
+      gen_params: genParams as unknown as Record<string, unknown>,
+    });
+    setProfileName("");
+    setSavingProfile(false);
+    refetchProfiles();
+  };
+
+  const applyProfile = (profileId: string) => {
+    const p = profiles.find((x) => x.id === Number(profileId));
+    if (!p) return;
+    if (p.system_prompt != null) setSystemPrompt(p.system_prompt);
+    if (p.gen_params) setGenParams(p.gen_params as unknown as GenParams);
+  };
+
   const isReady = chatStatus?.status === "ready";
+  const modelStatus = chatStatus?.status ?? "unloaded";
 
   const sendMessage = async () => {
     if (!input.trim() || !isReady || generating) return;
@@ -168,7 +218,6 @@ export default function ChatPage() {
     setInput("");
     setGenerating(true);
 
-    // Create conversation on first message
     let convId = activeConvId;
     if (!convId) {
       const title = userText.slice(0, 60) + (userText.length > 60 ? "…" : "");
@@ -177,13 +226,13 @@ export default function ChatPage() {
         model_path: loadForm.model_path || undefined,
         adapter_path: loadForm.adapter_path || undefined,
         system_prompt: systemPrompt || undefined,
+        gen_params: genParams as unknown as Record<string, unknown>,
       });
       convId = conv.id;
       setActiveConvId(convId);
       refetchConvs();
     }
 
-    // Persist user message
     await addConversationMessage(convId, "user", userText);
 
     const allMsgs: Message[] = [
@@ -247,9 +296,7 @@ export default function ChatPage() {
           }
         }
       }
-    } catch {
-      // AbortError — save whatever was generated
-    }
+    } catch { /* AbortError — save partial */ }
 
     if (assistantContent) {
       await addConversationMessage(convId!, "assistant", assistantContent);
@@ -263,51 +310,45 @@ export default function ChatPage() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
 
+  const bannerInfo = (() => {
+    if (modelStatus === "ready") return null;
+    if (modelStatus === "loading") return { text: "Model loading…", color: "var(--amber)", bg: "var(--amber-dim)" };
+    if (modelStatus === "error") return { text: chatStatus?.error ?? "Model failed to load — check logs", color: "var(--red)", bg: "var(--red-dim)" };
+    return { text: "No model loaded — select a model from the left panel and click Load Model", color: "var(--amber)", bg: "var(--amber-dim)" };
+  })();
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "380px 1fr", height: "calc(100vh - 40px)", overflow: "hidden" }}>
 
       {/* LEFT — config */}
       <div style={{ borderRight: "1px solid var(--border)", overflowY: "auto", padding: "10px 12px" }}>
 
-        {/* Header row */}
+        {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
           <span style={{ fontFamily: "var(--mono)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--accent)", background: "var(--accent-dim)", padding: "2px 7px", borderRadius: 2 }}>Chat</span>
-          <StatusDot status={chatStatus?.status ?? "unloaded"} />
+          <StatusDot status={modelStatus} />
         </div>
 
-        {/* Conversations */}
+        {/* Sessions */}
         <div style={{ marginBottom: 10 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
             <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Sessions</span>
-            <button className="lf-btn lf-btn-ghost" style={{ height: 20, fontSize: 10, padding: "0 8px" }} onClick={startNewChat}>
-              + New
-            </button>
+            <button className="lf-btn lf-btn-ghost" style={{ height: 20, fontSize: 10, padding: "0 8px" }} onClick={startNewChat}>+ New</button>
           </div>
-          <div style={{ maxHeight: 180, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
+          <div style={{ maxHeight: 160, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
             {conversations.length === 0 && (
-              <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", padding: "6px 0" }}>No sessions yet</div>
+              <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", padding: "4px 0" }}>No sessions yet</div>
             )}
             {conversations.map((c) => (
               <div key={c.id}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  padding: "5px 7px", borderRadius: 3, cursor: "pointer",
-                  background: activeConvId === c.id ? "var(--bg-hover)" : "transparent",
-                  border: `1px solid ${activeConvId === c.id ? "var(--border-hi)" : "transparent"}`,
-                  transition: "background 0.1s",
-                }}
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 7px", borderRadius: 3, cursor: "pointer", background: activeConvId === c.id ? "var(--bg-hover)" : "transparent", border: `1px solid ${activeConvId === c.id ? "var(--border-hi)" : "transparent"}` }}
                 onClick={() => loadConv(c.id)}
               >
                 <div style={{ flex: 1, overflow: "hidden" }}>
-                  <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: activeConvId === c.id ? "var(--text-hi)" : "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {c.title}
-                  </div>
-                  <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", marginTop: 1 }}>
-                    {c.message_count} msgs · {timeAgo(c.updated_at)}
-                  </div>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: activeConvId === c.id ? "var(--text-hi)" : "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</div>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", marginTop: 1 }}>{c.message_count} msgs · {timeAgo(c.updated_at)}</div>
                 </div>
-                <button
-                  onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${c.title}"?`)) doDelete(c.id); }}
+                <button onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${c.title}"?`)) doDeleteConv(c.id); }}
                   style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-dim)", fontSize: 11, padding: "1px 3px", borderRadius: 2, flexShrink: 0, lineHeight: 1 }}
                   onMouseEnter={(e) => (e.currentTarget.style.color = "var(--red)")}
                   onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-dim)")}
@@ -317,10 +358,45 @@ export default function ChatPage() {
           </div>
         </div>
 
+        {/* Profiles */}
+        <div style={{ marginBottom: 10, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Profiles</span>
+            <button className="lf-btn lf-btn-ghost" style={{ height: 20, fontSize: 10, padding: "0 8px" }} onClick={() => setSavingProfile((p) => !p)}>
+              {savingProfile ? "Cancel" : "+ Save"}
+            </button>
+          </div>
+          {savingProfile && (
+            <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+              <input className="lf-input" value={profileName} onChange={(e) => setProfileName(e.target.value)}
+                placeholder="Profile name…" onKeyDown={(e) => e.key === "Enter" && handleSaveProfile()}
+                style={{ flex: 1, height: 26, fontSize: 11 }} />
+              <button className="lf-btn lf-btn-primary" style={{ height: 26, fontSize: 10, padding: "0 10px" }} onClick={handleSaveProfile} disabled={!profileName.trim()}>Save</button>
+            </div>
+          )}
+          {profiles.length === 0 ? (
+            <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>No profiles saved</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {profiles.map((p) => (
+                <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 6px", borderRadius: 3, background: "var(--bg-input)", border: "1px solid var(--border)" }}>
+                  <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                  <button className="lf-btn lf-btn-ghost" style={{ height: 18, fontSize: 9, padding: "0 6px" }} onClick={() => applyProfile(String(p.id))}>apply</button>
+                  <button onClick={() => { if (confirm(`Delete profile "${p.name}"?`)) doDeleteProfile(p.id); }}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-dim)", fontSize: 11, padding: "1px 2px", lineHeight: 1 }}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = "var(--red)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-dim)")}
+                  >✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div style={{ borderTop: "1px solid var(--border)", marginBottom: 8 }} />
 
         {/* Model */}
-        <Section title="Model" />
+        <div style={{ fontFamily: "var(--mono)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-dim)", marginBottom: 6 }}>Model</div>
         <div style={{ marginBottom: 8 }}>
           <label className="lf-label">model</label>
           <select className="lf-input lf-select" value={loadForm.model_path} onChange={(e) => setLoadForm((p) => ({ ...p, model_path: e.target.value }))} style={{ marginBottom: 4 }}>
@@ -329,13 +405,11 @@ export default function ChatPage() {
           </select>
           <input className="lf-input" value={loadForm.model_path} onChange={(e) => setLoadForm((p) => ({ ...p, model_path: e.target.value }))} placeholder="or path / HF repo ID" />
         </div>
-
         <div style={{ marginBottom: 8 }}>
           <Field label="adapter path (optional)">
             <input className="lf-input" value={loadForm.adapter_path} onChange={(e) => setLoadForm((p) => ({ ...p, adapter_path: e.target.value }))} placeholder="./outputs/run1/final_adapter" />
           </Field>
         </div>
-
         <div style={{ marginBottom: 8 }}>
           <Field label="quantization">
             <select className="lf-input lf-select" value={loadForm.quantization} onChange={(e) => setLoadForm((p) => ({ ...p, quantization: e.target.value }))}>
@@ -343,7 +417,6 @@ export default function ChatPage() {
             </select>
           </Field>
         </div>
-
         <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
           <button className="lf-btn lf-btn-primary" style={{ flex: 1 }}
             disabled={isLoading || !loadForm.model_path || chatStatus?.status === "loading"}
@@ -355,14 +428,14 @@ export default function ChatPage() {
             Unload
           </button>
         </div>
-
         {chatStatus?.model_path && (
           <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)", marginBottom: 8, padding: "4px 8px", background: "var(--bg)", borderRadius: 3, border: "1px solid var(--border)", wordBreak: "break-all" }}>
             loaded: {chatStatus.model_path}
           </div>
         )}
 
-        <Section title="Generation Params" />
+        {/* Generation Params */}
+        <div style={{ fontFamily: "var(--mono)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-dim)", marginTop: 10, marginBottom: 6 }}>Generation Params</div>
         <div className="lf-row lf-row-2" style={{ marginBottom: 8 }}>
           <Field label="max new tokens">
             <input className="lf-input" type="number" value={genParams.max_new_tokens} onChange={(e) => setGenParams((p) => ({ ...p, max_new_tokens: +e.target.value }))} />
@@ -383,7 +456,15 @@ export default function ChatPage() {
           </Field>
         </div>
 
-        <Section title="System Prompt" />
+        {/* System Prompt */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10, marginBottom: 4 }}>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-dim)" }}>System Prompt</span>
+          {activeConvId && (
+            <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: settingsSaved ? "var(--green)" : "var(--amber)" }}>
+              {settingsSaved ? "saved" : "saving…"}
+            </span>
+          )}
+        </div>
         <textarea
           className="lf-input lf-console"
           value={systemPrompt}
@@ -399,13 +480,17 @@ export default function ChatPage() {
         {/* Toolbar */}
         <div style={{ borderBottom: "1px solid var(--border)", padding: "0 14px", height: 32, display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--bg-panel)", flexShrink: 0 }}>
           <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>
-            {activeConvId
-              ? `#${activeConvId} · ${messages.filter((m) => m.role !== "system").length} messages`
-              : "new session"}
+            {activeConvId ? `#${activeConvId} · ${messages.filter((m) => m.role !== "system").length} messages` : "new session"}
           </span>
-          <button className="lf-btn lf-btn-ghost" style={{ height: 22, fontSize: 10, padding: "0 8px" }}
-            onClick={startNewChat}>New Chat</button>
+          <button className="lf-btn lf-btn-ghost" style={{ height: 22, fontSize: 10, padding: "0 8px" }} onClick={startNewChat}>New Chat</button>
         </div>
+
+        {/* No-model warning banner */}
+        {bannerInfo && (
+          <div style={{ padding: "7px 14px", background: bannerInfo.bg, borderBottom: `1px solid ${bannerInfo.color}`, flexShrink: 0, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: bannerInfo.color }}>{bannerInfo.text}</span>
+          </div>
+        )}
 
         {/* Messages */}
         <div ref={chatRef} style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -424,19 +509,11 @@ export default function ChatPage() {
                 fontFamily: msg.role === "user" ? "var(--mono)" : "var(--sans)",
                 whiteSpace: msg.role === "user" ? "pre-wrap" : undefined,
               }}>
-                <div style={{ fontSize: 9, color: "var(--text-dim)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: "var(--mono)" }}>
-                  {msg.role}
-                </div>
+                <div style={{ fontSize: 9, color: "var(--text-dim)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: "var(--mono)" }}>{msg.role}</div>
                 {msg.role === "assistant" ? (
-                  <>
-                    <MarkdownMessage content={msg.content} />
-                    {generating && i === messages.length - 1 && <span className="lf-cursor" style={{ marginLeft: 2 }}>█</span>}
-                  </>
+                  <><MarkdownMessage content={msg.content} />{generating && i === messages.length - 1 && <span className="lf-cursor" style={{ marginLeft: 2 }}>█</span>}</>
                 ) : (
-                  <>
-                    {msg.content}
-                    {generating && i === messages.length - 1 && <span className="lf-cursor" style={{ marginLeft: 2 }}>█</span>}
-                  </>
+                  <>{msg.content}{generating && i === messages.length - 1 && <span className="lf-cursor" style={{ marginLeft: 2 }}>█</span>}</>
                 )}
               </div>
             </div>
@@ -452,23 +529,14 @@ export default function ChatPage() {
             placeholder={isReady ? "Type a message… (Enter to send, Shift+Enter for newline)" : "Load a model first"}
             disabled={!isReady || generating}
             rows={2}
-            style={{
-              flex: 1, resize: "none", fontFamily: "var(--mono)", fontSize: 12,
-              background: "var(--bg-input)", border: "1px solid var(--border)", borderRadius: 3,
-              color: "var(--text)", padding: "6px 8px", outline: "none",
-            }}
+            style={{ flex: 1, resize: "none", fontFamily: "var(--mono)", fontSize: 12, background: "var(--bg-input)", border: "1px solid var(--border)", borderRadius: 3, color: "var(--text)", padding: "6px 8px", outline: "none" }}
           />
           {generating ? (
             <button className="lf-btn lf-btn-danger" style={{ alignSelf: "flex-end", height: 36, padding: "0 16px" }}
-              onClick={() => { abortRef.current?.abort(); setGenerating(false); }}>
-              ■ Stop
-            </button>
+              onClick={() => { abortRef.current?.abort(); setGenerating(false); }}>■ Stop</button>
           ) : (
             <button className="lf-btn lf-btn-primary" style={{ alignSelf: "flex-end", height: 36, padding: "0 16px" }}
-              disabled={!isReady || !input.trim()}
-              onClick={sendMessage}>
-              Send
-            </button>
+              disabled={!isReady || !input.trim()} onClick={sendMessage}>Send</button>
           )}
         </div>
       </div>

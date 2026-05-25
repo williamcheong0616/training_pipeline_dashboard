@@ -74,17 +74,24 @@ export interface ConversationSummary {
 }
 export interface ConversationMessage { id: number; role: string; content: string; created_at: string; }
 export interface ConversationDetail extends ConversationSummary {
-  adapter_path: string | null; system_prompt: string | null; messages: ConversationMessage[];
+  adapter_path: string | null; system_prompt: string | null; gen_params: Record<string, unknown> | null; messages: ConversationMessage[];
 }
 export const getConversations = () => http.get<ConversationSummary[]>("/conversations").then((r) => r.data);
 export const getConversation = (id: number) => http.get<ConversationDetail>(`/conversations/${id}`).then((r) => r.data);
 export const createConversation = (body: { title?: string; model_path?: string; adapter_path?: string; system_prompt?: string }) =>
   http.post<ConversationSummary>("/conversations", body).then((r) => r.data);
-export const updateConversation = (id: number, body: { title?: string; system_prompt?: string }) =>
+export const updateConversation = (id: number, body: { title?: string; system_prompt?: string; gen_params?: Record<string, unknown> }) =>
   http.patch<ConversationSummary>(`/conversations/${id}`, body).then((r) => r.data);
 export const deleteConversation = (id: number) => http.delete(`/conversations/${id}`);
 export const addConversationMessage = (id: number, role: string, content: string) =>
   http.post<ConversationMessage>(`/conversations/${id}/messages`, { role, content }).then((r) => r.data);
+
+// Prompt profiles
+export interface PromptProfile { id: number; name: string; system_prompt: string | null; gen_params: Record<string, unknown> | null; created_at: string; }
+export const getPromptProfiles = () => http.get<PromptProfile[]>("/prompt-profiles").then((r) => r.data);
+export const createPromptProfile = (body: { name: string; system_prompt?: string; gen_params?: Record<string, unknown> }) =>
+  http.post<PromptProfile>("/prompt-profiles", body).then((r) => r.data);
+export const deletePromptProfile = (id: number) => http.delete(`/prompt-profiles/${id}`);
 
 // ASR
 export const getASRModels = () => http.get<{ id: string; params: string }[]>("/asr/models").then((r) => r.data);

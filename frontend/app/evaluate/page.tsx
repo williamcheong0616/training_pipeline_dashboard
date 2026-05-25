@@ -75,7 +75,12 @@ export default function EvaluatePage() {
     const { model_path, adapter_path } = resolveJobPaths(job, models);
     const asr = job.training_method === "asr_whisper";
     setIsASR(asr);
-    setForm((p) => ({ ...p, model_path, adapter_path }));
+    setForm((p) => ({
+      ...p,
+      model_path,
+      adapter_path,
+      ...(job.dataset_id ? { dataset_id: String(job.dataset_id) } : {}),
+    }));
   }, [selectedJobId, sourceMode, completedJobs, models]);
 
   // Clear adapter path when switching to base_model mode
@@ -372,13 +377,20 @@ export default function EvaluatePage() {
           </>
         )}
 
-        <div style={{ display: "flex", gap: 8, paddingTop: 12, borderTop: "1px solid var(--border)", marginTop: 4 }}>
-          <button className="lf-btn lf-btn-primary" style={{ flex: 1 }}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, paddingTop: 12, borderTop: "1px solid var(--border)", marginTop: 4 }}>
+          <button className="lf-btn lf-btn-primary"
             disabled={running || !canStart} onClick={handleStart}>
             {running
               ? <><span className="lf-spin" /> {evalMode === "evaluate" ? "Evaluating…" : "Predicting…"}</>
               : `▶ Start ${evalMode === "evaluate" ? "Evaluate" : "Predict"}`}
           </button>
+          {!canStart && !running && (
+            <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--amber, #f59e0b)", textAlign: "center" }}>
+              {!form.model_path
+                ? "Select a completed run or enter a model path above"
+                : "Select a dataset to evaluate against"}
+            </div>
+          )}
         </div>
       </div>
 

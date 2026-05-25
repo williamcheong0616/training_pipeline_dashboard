@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from backend.db.session import init_db, engine
-from backend.api.routes import jobs, models, datasets, exports, asr, eval as eval_routes, chat, conversations
+from backend.api.routes import jobs, models, datasets, exports, asr, eval as eval_routes, chat, conversations, prompt_profiles
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 _log_level = os.getenv("LOG_LEVEL", "info").upper()
@@ -63,6 +63,7 @@ app.include_router(asr.router)
 app.include_router(eval_routes.router)
 app.include_router(chat.router)
 app.include_router(conversations.router)
+app.include_router(prompt_profiles.router)
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

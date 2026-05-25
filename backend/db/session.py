@@ -31,6 +31,7 @@ def init_db():
                 "ALTER TABLE jobs ADD COLUMN remarks TEXT",
                 "ALTER TABLE datasets ADD COLUMN template TEXT",
                 "CREATE INDEX IF NOT EXISTS ix_training_metrics_job_id ON training_metrics (job_id)",
+                "ALTER TABLE conversations ADD COLUMN gen_params JSON",
             ]:
                 try:
                     conn.execute(text(stmt))

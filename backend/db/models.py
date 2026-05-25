@@ -104,6 +104,7 @@ class Conversation(Base):
     model_path = Column(String, nullable=True)
     adapter_path = Column(String, nullable=True)
     system_prompt = Column(Text, nullable=True)
+    gen_params = Column(JSON, nullable=True)
     created_at = Column(TZDateTime, default=now_utc)
     updated_at = Column(TZDateTime, default=now_utc)
 
@@ -120,3 +121,13 @@ class ChatMessage(Base):
     created_at = Column(TZDateTime, default=now_utc)
 
     conversation = relationship("Conversation", back_populates="messages")
+
+
+class PromptProfile(Base):
+    __tablename__ = "prompt_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    system_prompt = Column(Text, nullable=True)
+    gen_params = Column(JSON, nullable=True)
+    created_at = Column(TZDateTime, default=now_utc)
