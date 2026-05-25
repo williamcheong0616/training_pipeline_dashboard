@@ -44,6 +44,12 @@ async def list_exports():
     return await asyncio.to_thread(_scan)
 
 
+def _ts() -> str:
+    """Return timestamp in ddmmyy_HHMMam format, e.g. 250526_0130pm."""
+    now = datetime.now()
+    return now.strftime("%d%m%y_") + now.strftime("%I%M%p").lower()
+
+
 def _safe_output_name(raw: str, fallback: str) -> str:
     name = re.sub(r'[/\\:*?"<>|]', '_', (raw or "").strip())[:128]
     return name or fallback
@@ -90,7 +96,7 @@ def _merge_adapter(adapter_path: str, save_path: str):
 def export_from_path(body: PathExportRequest, background_tasks: BackgroundTasks):
     if not os.path.isdir(body.adapter_path):
         raise HTTPException(status_code=400, detail="Adapter path does not exist")
-    name = _safe_output_name(body.output_name, f"merged_custom_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}")
+    name = _safe_output_name(body.output_name, f"custom_{_ts()}")
     try:
         save_path = _validated_save_path(name)
     except ValueError as e:
@@ -109,7 +115,8 @@ def export_job(job_id: int, body: ExportRequest, background_tasks: BackgroundTas
     if not job.output_dir or not os.path.isdir(job.output_dir):
         raise HTTPException(status_code=400, detail="Output directory not found")
 
-    name = _safe_output_name(body.output_name, f"merged_job_{job_id}")
+    safe_job_name = re.sub(r'[/\\:*?"<>|\s]+', '_', job.name)[:40]
+    name = _safe_output_name(body.output_name, f"{safe_job_name}_{_ts()}")
     try:
         save_path = _validated_save_path(name)
     except ValueError as e:

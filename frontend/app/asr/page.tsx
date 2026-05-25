@@ -120,7 +120,16 @@ const DEFAULT: FormState = {
   predict_with_generate: true, generation_max_length: 225,
   load_best_model_at_end: true,
   fp16: true, bf16: false, gradient_checkpointing: true,
-  output_dir: "./outputs/asr_run",
+  output_dir: (() => {
+    const now = new Date();
+    const dd = String(now.getDate()).padStart(2, "0");
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const yy = String(now.getFullYear()).slice(2);
+    const hh = String(now.getHours() % 12 || 12);
+    const min = String(now.getMinutes()).padStart(2, "0");
+    const ap = now.getHours() < 12 ? "am" : "pm";
+    return `./outputs/asr_run_${dd}${mm}${yy}_${hh}${min}${ap}`;
+  })(),
 };
 
 function StatusPill({ status }: { status: string }) {
@@ -156,6 +165,22 @@ export default function ASRPage() {
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
+
+  const dirTouchedRef = useRef(false);
+  const handleNameChange = (v: string) => {
+    set("name", v);
+    if (!dirTouchedRef.current) {
+      const now = new Date();
+      const dd = String(now.getDate()).padStart(2, "0");
+      const mm = String(now.getMonth() + 1).padStart(2, "0");
+      const yy = String(now.getFullYear()).slice(2);
+      const hh = String(now.getHours() % 12 || 12);
+      const min = String(now.getMinutes()).padStart(2, "0");
+      const ap = now.getHours() < 12 ? "am" : "pm";
+      const slug = v.trim().replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40) || "asr_run";
+      set("output_dir", `./outputs/${slug}_${dd}${mm}${yy}_${hh}${min}${ap}`);
+    }
+  };
 
   const toggleModule = (mod: string) =>
     set("target_modules",
@@ -499,10 +524,10 @@ export default function ASRPage() {
         <Section title="Output" tooltip="Run labeling and checkpoint output location." />
         <div className="lf-row lf-row-2" style={{ marginBottom: 8 }}>
           <Field label="run name" tooltip="Label for this training run in the job list and log output. Does not affect training.">
-            <input className="lf-input" value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="whisper-malay-ft" />
+            <input className="lf-input" value={form.name} onChange={(e) => handleNameChange(e.target.value)} placeholder="whisper-malay-ft" />
           </Field>
           <Field label="output dir" tooltip="Directory where checkpoints and the final adapter weights are saved. Use a unique path per run to avoid overwriting previous results. Large models can use significant disk space — ensure sufficient free space.">
-            <input className="lf-input" value={form.output_dir} onChange={(e) => set("output_dir", e.target.value)} />
+            <input className="lf-input" value={form.output_dir} onChange={(e) => { dirTouchedRef.current = true; set("output_dir", e.target.value); }} />
           </Field>
         </div>
 

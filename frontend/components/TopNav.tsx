@@ -11,6 +11,7 @@ const TABS = [
   { href: "/asr",       label: "ASR" },
   { href: "/evaluate",  label: "Evaluate" },
   { href: "/chat",      label: "Chat" },
+  { href: "/sandbox",   label: "Sandbox" },
   { href: "/export",    label: "Export" },
   { href: "/history",   label: "History" },
   { href: "/jobs",      label: "Jobs" },

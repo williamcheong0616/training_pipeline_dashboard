@@ -23,7 +23,7 @@ export const getJobMetrics = (id: number) =>
 
 // Models
 export const getModels = () => http.get<ModelEntry[]>("/models").then((r) => r.data);
-export const registerModel = (body: { name: string; hf_repo: string; architecture?: string; template?: string }) =>
+export const registerModel = (body: { name: string; hf_repo: string; architecture?: string; template?: string; version?: string }) =>
   http.post<ModelEntry>("/models", body).then((r) => r.data);
 export const downloadModel = (id: number) => http.post(`/models/${id}/download`);
 export const getModelDownloadStatus = (id: number) =>
@@ -63,6 +63,12 @@ export const loadChatModel = (body: { model_path: string; adapter_path?: string;
 export const getChatStatus = () =>
   http.get<{ status: string; model_path: string | null; adapter_path: string | null; error: string | null }>("/chat/status").then((r) => r.data);
 export const unloadChatModel = () => http.post("/chat/unload").then((r) => r.data);
+
+// Sandbox
+export const transcribeAudio = (form: FormData) =>
+  http.post<{ transcript: string; model_path: string }>("/sandbox/asr/transcribe", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  }).then((r) => r.data);
 
 // System
 export const getSystemStats = () => http.get<SystemStats>("/system").then((r) => r.data);

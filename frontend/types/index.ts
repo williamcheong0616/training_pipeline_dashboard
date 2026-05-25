@@ -38,6 +38,7 @@ export interface ModelEntry {
   template: string;
   is_downloaded: string;
   downloaded_at: string | null;
+  version: string | null;
 }
 
 export interface HFSearchResult {
